@@ -1,0 +1,367 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Bavaria Sport 32 — Mørk modus
+   Aktiveres med: <html data-theme="dark">
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] {
+  --blue:        #4a9eff;
+  --blue-hover:  #6bb3ff;
+  --blue-tint:   #0d1f3c;
+  --red:         #ff4d6a;
+
+  --ink:         #f0f0f0;
+  --ink-medium:  #c0c0c0;
+  --ink-light:   #888888;
+  --line:        #2a2a2a;
+  --surface:     #161616;
+  --white:       #111111;
+
+  --ok:          #4dbb78;
+  --ok-tint:     #0d2318;
+  --warn:        #ffaa44;
+  --warn-tint:   #2a1a00;
+  --danger:      #ff5566;
+  --danger-tint: #2a0a0d;
+}
+
+/* Header og nav beholder mørk blå — bare juster detaljer */
+[data-theme="dark"] .hdr {
+  background: #001a3d;
+  border-bottom-color: var(--red);
+  box-shadow: 0 2px 16px rgba(0,0,0,.5);
+}
+
+[data-theme="dark"] .tnav {
+  background: #111111;
+  border-bottom-color: var(--line);
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+
+[data-theme="dark"] .sidebar {
+  background: #111111;
+  border-right-color: var(--line);
+}
+
+/* Sensorkorter — mørk bakgrunn med subtil kant */
+[data-theme="dark"] .sc {
+  background: #1a1a1a;
+  border-color: #2a2a2a;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
+}
+
+/* KPI-rutenett */
+[data-theme="dark"] .kc {
+  background: #1a1a1a;
+}
+[data-theme="dark"] .krow {
+  background: #2a2a2a;
+  border-color: #2a2a2a;
+}
+
+/* Spesifikasjonstabellen */
+[data-theme="dark"] .spc {
+  border-bottom-color: var(--line);
+}
+[data-theme="dark"] .spg {
+  border-top-color: var(--line);
+}
+
+/* Inputfelt */
+[data-theme="dark"] .set-inp {
+  background: #1e1e1e;
+  color: var(--ink);
+  border-bottom-color: #333;
+}
+[data-theme="dark"] .set-inp:focus {
+  border-bottom-color: var(--blue);
+  background: #222;
+}
+
+/* Settings-panel */
+[data-theme="dark"] .settings-panel {
+  background: #111;
+}
+[data-theme="dark"] .set-hdr {
+  background: #001a3d;
+}
+[data-theme="dark"] .set-body {
+  background: #111;
+}
+
+/* Alertbokser */
+[data-theme="dark"] .al {
+  background: #1f1500;
+  border-left-color: var(--warn);
+}
+[data-theme="dark"] .al.cr {
+  background: #1f0508;
+  border-left-color: var(--danger);
+}
+[data-theme="dark"] .al.gr {
+  background: #051a0d;
+  border-left-color: var(--ok);
+}
+
+/* Strøm-hero beholder blå, justert */
+[data-theme="dark"] .e-hero {
+  background: #001a3d;
+}
+[data-theme="dark"] .e-prog-card {
+  background: #1a1a1a;
+  border-color: #2a2a2a;
+}
+[data-theme="dark"] .e-src-row,
+[data-theme="dark"] .e-load-row {
+  border-bottom-color: var(--line);
+}
+[data-theme="dark"] .e-loads,
+[data-theme="dark"] .e-sources {
+  border-top-color: var(--line);
+}
+
+/* Vær-widgets */
+[data-theme="dark"] .wx-hero {
+  background: #001a3d;
+}
+
+/* Vessel-hero */
+[data-theme="dark"] .vhero {
+  background: #001a3d;
+}
+
+/* Chart-kort */
+[data-theme="dark"] .chw {
+  background: #1a1a1a;
+  border-color: #2a2a2a;
+}
+
+/* Tripperader */
+[data-theme="dark"] .trip-dc {
+  background: #001a3d;
+}
+[data-theme="dark"] .trip-r {
+  border-bottom-color: var(--line);
+}
+[data-theme="dark"] .trip-r:hover {
+  background: #1a1a1a;
+}
+
+/* Listerader */
+[data-theme="dark"] .dui,
+[data-theme="dark"] .alar {
+  border-bottom-color: var(--line);
+}
+
+/* Scroll-indikator for nav */
+[data-theme="dark"] .nb { color: #555; }
+[data-theme="dark"] .nb.active { color: var(--blue); }
+
+/* Page-bakgrunn */
+[data-theme="dark"] body { background: #0d0d0d; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Stor-knapp-modus (båtmodus)
+   Aktiveres med: <html data-mode="large">
+   Optimalisert for touch med hansker, lav lysstyrke, fart
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-mode="large"] {
+  --nav-h: 68px;
+}
+
+/* Større nav-knapper */
+[data-mode="large"] .nb {
+  font-size: 11px;
+  min-width: 60px;
+  padding: 6px 4px;
+}
+[data-mode="large"] .nb .ni {
+  font-size: 1.4rem;
+}
+
+/* Sensorkorter — større tall, mer luft */
+[data-mode="large"] .sc {
+  padding: 20px 16px 16px;
+}
+[data-mode="large"] .sc-v {
+  font-size: 2.6rem;
+}
+[data-mode="large"] .sc-lbl {
+  font-size: 12px;
+}
+
+/* KPI-verdier større */
+[data-mode="large"] .kc-v {
+  font-size: 1.4rem;
+}
+
+/* Større prognose-verdier */
+[data-mode="large"] .e-prog-value {
+  font-size: 1.9rem;
+}
+[data-mode="large"] .e-hero-soc {
+  font-size: 4.8rem;
+}
+[data-mode="large"] .e-stat-v {
+  font-size: 1.5rem;
+}
+
+/* Knapper mye større */
+[data-mode="large"] .btn-primary,
+[data-mode="large"] .btn-secondary {
+  padding: 16px 24px;
+  font-size: 14px;
+  min-height: 52px;
+}
+
+/* Listerader — høyere */
+[data-mode="large"] .dui {
+  padding: 18px 0;
+}
+[data-mode="large"] .alar {
+  padding: 16px 0;
+}
+[data-mode="large"] .dun,
+[data-mode="large"] .alm {
+  font-size: 16px;
+}
+[data-mode="large"] .dum,
+[data-mode="large"] .alt {
+  font-size: 12px;
+}
+
+/* Source- og lastrader */
+[data-mode="large"] .e-src-row {
+  padding: 18px 0;
+}
+[data-mode="large"] .e-src-name {
+  font-size: 16px;
+}
+[data-mode="large"] .e-load-row {
+  padding: 14px 0;
+}
+[data-mode="large"] .e-load-name {
+  font-size: 15px;
+}
+[data-mode="large"] .e-load-w {
+  font-size: 1.2rem;
+}
+
+/* Spec-tabellen */
+[data-mode="large"] .spc {
+  padding: 14px 0;
+}
+[data-mode="large"] .spk {
+  font-size: 12px;
+}
+[data-mode="large"] .spv {
+  font-size: 15px;
+}
+
+/* Headers */
+[data-mode="large"] .ph-t {
+  font-size: 32px;
+}
+[data-mode="large"] .sl {
+  font-size: 12px;
+  margin-top: 32px;
+}
+
+/* Skjul pynt og uvesentlig tekst */
+[data-mode="large"] .sc-src {
+  display: none;
+}
+[data-mode="large"] .ph-s {
+  display: none;
+}
+
+/* ── Kombinasjon: mørk + stor ── */
+[data-theme="dark"][data-mode="large"] .sc {
+  border-left: 3px solid #2a2a2a;
+}
+[data-theme="dark"][data-mode="large"] .sc-line.ok  { height: 4px; }
+[data-theme="dark"][data-mode="large"] .sc-line.wn  { height: 4px; }
+[data-theme="dark"][data-mode="large"] .sc-line.cr  { height: 4px; }
+
+/* ── Modusvelger UI ── */
+.mode-panel {
+  display: none;
+  position: fixed; inset: 0; z-index: 450;
+  background: rgba(0,0,0,.6);
+  align-items: flex-end;
+  backdrop-filter: blur(4px);
+}
+.mode-panel.open {
+  display: flex;
+  animation: mpIn .2s ease;
+}
+@keyframes mpIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.mode-sheet {
+  width: 100%;
+  background: var(--white);
+  padding: 24px 20px calc(24px + var(--sab));
+  border-top: 3px solid var(--red);
+  box-shadow: 0 -8px 32px rgba(0,0,0,.2);
+}
+[data-theme="dark"] .mode-sheet {
+  background: #1a1a1a;
+}
+.mode-sheet-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 14px;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink); margin-bottom: 20px;
+  display: flex; align-items: center;
+  justify-content: space-between;
+}
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mode-btn {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 20px 12px;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  cursor: pointer;
+  transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+[data-theme="dark"] .mode-btn {
+  background: #222;
+  border-color: #333;
+}
+.mode-btn:active { transform: scale(.97); }
+.mode-btn.selected {
+  border-color: var(--blue);
+  background: var(--blue-tint);
+}
+[data-theme="dark"] .mode-btn.selected {
+  background: #0d1f3c;
+}
+.mode-btn-icon {
+  font-size: 2rem; line-height: 1;
+}
+.mode-btn-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 13px;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink);
+}
+.mode-btn-sub {
+  font-size: 11px; color: var(--ink-light); text-align: center;
+  font-weight: 300; line-height: 1.4;
+}
+.mode-close {
+  width: 100%; padding: 14px;
+  background: var(--blue); border: none; color: #fff;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 13px;
+  letter-spacing: .12em; text-transform: uppercase;
+  cursor: pointer;
+}

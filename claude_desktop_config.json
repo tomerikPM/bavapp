@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "signalk": {
+      "command": "npx",
+      "args": ["-y", "signalk-mcp-server"],
+      "env": {
+        "SIGNALK_HOST": "localhost",
+        "SIGNALK_PORT": "3000"
+      }
+    }
+  }
+}

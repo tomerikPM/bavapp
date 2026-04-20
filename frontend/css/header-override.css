@@ -1,0 +1,72 @@
+/* header-override.css — Design System v5 header patch */
+:root { --hdr-h: 52px; }
+
+.hdr {
+  min-height: calc(var(--hdr-h) + var(--sat));
+  padding-top: var(--sat);
+  padding-left: max(14px, var(--sal));
+  padding-right: max(10px, var(--sar));
+  padding-bottom: 0;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* Skjul gammelt layout */
+.hdr-l { display: none !important; }
+.logo-quip { display: none !important; }
+.logo-meta { display: none !important; }
+
+/* Venstre: båtnavn + preposisjonsgenerator — klikk → hjem */
+.hdr-brand {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+}
+.hdr-brand:hover .logo-n { opacity: .8; }
+
+.logo-n {
+  font-size: 1.2rem;
+  color: #fff;
+  transition: opacity .15s;
+}
+
+.logo-prep {
+  font-size: 9.5px;
+  font-style: italic;
+  letter-spacing: .07em;
+  color: rgba(255,255,255,.45);  /* mer synlig enn .3 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+  margin-top: 0;
+}
+
+/* Midtseksjon: sol og tidevann */
+.hdr-meta {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: 5px; overflow: hidden;
+  font-size: 10px;           /* litt større */
+  color: rgba(255,255,255,.5); /* mer synlig */
+  white-space: nowrap;
+}
+@media (max-width: 420px) { .hdr-meta { display: none; } }
+.hdr-meta .lm-v {
+  color: rgba(255,255,255,.85);  /* tydelig hvit for tallene */
+  font-weight: 500;
+}
+.hdr-meta .lm-sep {
+  width: 1px; height: 8px;
+  background: rgba(255,255,255,.2);
+  flex-shrink: 0;
+}
+
+/* Høyre: SK + knapper på EN rad */
+.hdr-r {
+  flex: 0 0 auto;
+  display: flex; flex-direction: row; align-items: center; gap: 4px;
+}
+
+/* Faner: horizontal scroll på mobil */
+.page-tabs { overflow-x: auto; scrollbar-width: none; }
+.page-tabs::-webkit-scrollbar { display: none; }
+.page-tab { white-space: nowrap; }

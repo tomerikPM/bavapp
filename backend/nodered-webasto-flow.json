@@ -1,0 +1,292 @@
+[
+  {
+    "id": "webasto-tab",
+    "type": "tab",
+    "label": "Webasto W-Bus",
+    "disabled": false,
+    "info": "Webasto AirTop Evo 3900 Marine — W-Bus kontroll via USB KKL-adapter.\n\nOppsett:\n1. Koble KKL USB-adapter til Cerbo GX USB og Webasto W-Bus-kontakt\n2. Sett riktig serialport i 'wbus-serial'-noden (typisk /dev/ttyUSB0)\n3. Deploy flyten og test via /webasto/status"
+  },
+  {
+    "id": "wbus-comment-main",
+    "type": "comment",
+    "z": "webasto-tab",
+    "name": "Webasto AirTop Evo 3900 — W-Bus kontroll",
+    "info": "Protokoll: W-Bus, K-line, 2400 baud 8N1\nMaster addr: 0xF4\nHeater addr: 0x43 (Air Top)\n\nKommandoer:\n  0x05 = Status\n  0x22 = Start varme\n  0x7D = Start med temperatur\n  0x10 = Stopp",
+    "x": 160,
+    "y": 40
+  },
+
+  {
+    "id": "wbus-http-in",
+    "type": "http in",
+    "z": "webasto-tab",
+    "name": "POST /webasto/command",
+    "url": "/webasto/command",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 120
+  },
+  {
+    "id": "wbus-build-cmd",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Bygg W-Bus kommando",
+    "func": "// W-Bus protokoll for Webasto Air Top\n// Adresser: master=0xF4, heater=0x43\n\nfunction checksum(bytes) {\n    return bytes.reduce((a, b) => a ^ b, 0);\n}\n\nfunction buildPacket(cmd, data) {\n    data = data || [];\n    var heater = 0x43;\n    var master = 0xF4;\n    var len    = data.length + 1;\n    var packet = [heater, master, len, cmd].concat(data);\n    packet.push(checksum(packet));\n    return Buffer.from(packet);\n}\n\nvar command     = msg.payload.command     || 'status';\nvar temperature = msg.payload.temperature || null;\n\nvar packet;\nswitch (command) {\n    case 'start':\n        if (temperature !== null) {\n            // 0x7D = start med temperatur\n            // temp sendes som (°C + 50) * 2 for noen Webasto-modeller\n            // Sjekk din modells W-Bus spec om dette ikke virker\n            var tempByte = Math.round(temperature * 2) & 0xFF;\n            packet = buildPacket(0x7D, [tempByte]);\n        } else {\n            packet = buildPacket(0x22, []);\n        }\n        break;\n    case 'ventilation':\n        // Vifte uten forbrenning\n        packet = buildPacket(0x56, []);\n        break;\n    case 'stop':\n        packet = buildPacket(0x10, []);\n        break;\n    case 'status':\n    default:\n        packet = buildPacket(0x05, []);\n        break;\n}\n\nmsg._command    = command;\nmsg._temperature = temperature;\nmsg._req        = msg.req;\nmsg._res        = msg.res;\nmsg.payload     = packet;\nreturn msg;",
+    "outputs": 1,
+    "x": 390,
+    "y": 120
+  },
+  {
+    "id": "wbus-serial-out",
+    "type": "serial out",
+    "z": "webasto-tab",
+    "name": "W-Bus Serial (KKL USB)",
+    "serial": "wbus-serial-port",
+    "x": 640,
+    "y": 120
+  },
+  {
+    "id": "wbus-delay",
+    "type": "delay",
+    "z": "webasto-tab",
+    "name": "Vent på svar",
+    "pauseType": "delay",
+    "timeout": "500",
+    "timeoutUnits": "milliseconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "x": 880,
+    "y": 120
+  },
+
+  {
+    "id": "wbus-serial-in",
+    "type": "serial in",
+    "z": "webasto-tab",
+    "name": "W-Bus Serial svar",
+    "serial": "wbus-serial-port",
+    "x": 160,
+    "y": 240
+  },
+  {
+    "id": "wbus-parse-response",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Parse W-Bus svar",
+    "func": "// Parse W-Bus statussvar fra Webasto\n// Format: [addr][master][len][cmd][data...][checksum]\n\nvar buf = msg.payload;\nif (!Buffer.isBuffer(buf) || buf.length < 4) {\n    node.warn('For kort svar: ' + buf.length + ' bytes');\n    return null;\n}\n\n// Checksum-verifisering\nvar cs = buf.slice(0, -1).reduce(function(a, b) { return a ^ b; }, 0);\nif (cs !== buf[buf.length - 1]) {\n    node.warn('W-Bus checksum feil');\n    return null;\n}\n\nvar addr  = buf[0];\nvar cmd   = buf[3];\nvar data  = buf.slice(4, -1);\n\n// Status-byte tolkning (kommando 0x05 respons)\nvar STATE_MAP = {\n    0x00: 'off',\n    0x01: 'starting',\n    0x02: 'running',\n    0x04: 'cooling',\n    0x08: 'ventilation',\n    0x10: 'fault'\n};\n\nvar statusByte = data.length > 0 ? data[0] : 0;\nvar state      = STATE_MAP[statusByte] || 'unknown';\nvar voltage    = data.length > 1 ? data[1] * 0.1 : null;  // V\nvar temperature = data.length > 2 ? data[2] - 50 : null;   // °C\nvar faultCode  = (statusByte & 0x10) ? ('0x' + statusByte.toString(16).toUpperCase()) : null;\n\nmsg.webastoState = {\n    state:       state,\n    voltage:     voltage,\n    temperature: temperature,\n    fault:       statusByte === 0x10,\n    faultCode:   faultCode,\n    raw:         buf.toString('hex').toUpperCase()\n};\n\nnode.status({ fill: state==='running'?'green':state==='fault'?'red':'grey', shape:'dot', text: state });\nreturn msg;",
+    "outputs": 1,
+    "x": 390,
+    "y": 240
+  },
+  {
+    "id": "wbus-to-signalk",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Oppdater Signal K",
+    "func": "var ws = msg.webastoState;\nif (!ws) return null;\n\n// Signal K delta-format\nmsg.payload = {\n    updates: [{\n        source: { label: 'webasto-wbus', type: 'NMEA2000' },\n        timestamp: new Date().toISOString(),\n        values: [\n            { path: 'environment.heating.0.state',             value: ws.state },\n            { path: 'environment.heating.0.operatingVoltage',  value: ws.voltage },\n            { path: 'environment.heating.0.currentTemperature', value: ws.temperature !== null ? ws.temperature + 273.15 : null },\n            { path: 'environment.heating.0.fault',             value: ws.fault },\n            { path: 'environment.heating.0.faultCode',         value: ws.faultCode },\n        ].filter(function(v) { return v.value !== null && v.value !== undefined; })\n    }]\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 630,
+    "y": 240
+  },
+  {
+    "id": "wbus-sk-put",
+    "type": "http request",
+    "z": "webasto-tab",
+    "name": "Signal K PUT",
+    "method": "PUT",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://localhost:3000/signalk/v1/api/vessels/self",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "x": 860,
+    "y": 240
+  },
+  {
+    "id": "wbus-debug",
+    "type": "debug",
+    "z": "webasto-tab",
+    "name": "W-Bus debug",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "webastoState",
+    "targetType": "msg",
+    "x": 870,
+    "y": 300
+  },
+
+  {
+    "id": "wbus-http-status",
+    "type": "http in",
+    "z": "webasto-tab",
+    "name": "GET /webasto/status",
+    "url": "/webasto/status",
+    "method": "get",
+    "x": 160,
+    "y": 380
+  },
+  {
+    "id": "wbus-poll-status",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Bygg status-forespørsel",
+    "func": "msg._req = msg.req;\nmsg._res = msg.res;\nmsg.payload = Buffer.from([0x43, 0xF4, 0x01, 0x05, 0x43 ^ 0xF4 ^ 0x01 ^ 0x05]);\nreturn msg;",
+    "outputs": 1,
+    "x": 400,
+    "y": 380
+  },
+  {
+    "id": "wbus-serial-out-2",
+    "type": "serial out",
+    "z": "webasto-tab",
+    "name": "W-Bus Serial",
+    "serial": "wbus-serial-port",
+    "x": 640,
+    "y": 380
+  },
+  {
+    "id": "wbus-send-response",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Send HTTP-svar",
+    "func": "// Send tilbake nåværende tilstand til BavApp-backenden\nvar globalCtx = global.get('webastoState') || { state: 'unknown' };\nmsg.res  = msg._res;\nmsg.payload = globalCtx;\nreturn msg;",
+    "outputs": 1,
+    "x": 870,
+    "y": 380
+  },
+  {
+    "id": "wbus-http-response-1",
+    "type": "http response",
+    "z": "webasto-tab",
+    "name": "HTTP svar — kommando",
+    "statusCode": "200",
+    "headers": { "content-type": "application/json" },
+    "x": 1100,
+    "y": 120
+  },
+  {
+    "id": "wbus-http-response-2",
+    "type": "http response",
+    "z": "webasto-tab",
+    "name": "HTTP svar — status",
+    "statusCode": "200",
+    "headers": { "content-type": "application/json" },
+    "x": 1100,
+    "y": 380
+  },
+  {
+    "id": "wbus-store-state",
+    "type": "function",
+    "z": "webasto-tab",
+    "name": "Lagre global tilstand",
+    "func": "global.set('webastoState', msg.webastoState);\n\n// Send HTTP-svar på den opprinnelige kommando-requesten\nif (msg._res) {\n    msg.res     = msg._res;\n    msg.payload = { ok: true, state: msg.webastoState };\n    return msg;\n}\nreturn null;",
+    "outputs": 1,
+    "x": 1100,
+    "y": 240
+  },
+
+  {
+    "id": "wbus-auto-poll",
+    "type": "inject",
+    "z": "webasto-tab",
+    "name": "Automatisk polling (10s)",
+    "props": [{ "p": "payload" }],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "{\"command\":\"status\"}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 460
+  },
+
+  {
+    "id": "wbus-serial-port",
+    "type": "serial-port",
+    "name": "Webasto KKL USB",
+    "serialport": "/dev/ttyUSB0",
+    "serialbaud": "2400",
+    "databits": "8",
+    "parity": "none",
+    "stopbits": "1",
+    "waitfor": "",
+    "newline": "",
+    "bin": "bin",
+    "out": "time",
+    "addchar": "",
+    "responsetimeout": "500"
+  },
+
+  {
+    "id": "link-serial-out-to-delay",
+    "type": "wires",
+    "source": "wbus-serial-out",
+    "target": "wbus-delay"
+  },
+  {
+    "id": "link-http-in-to-build",
+    "type": "wires",
+    "source": "wbus-http-in",
+    "target": "wbus-build-cmd"
+  },
+  {
+    "id": "link-build-to-serial",
+    "type": "wires",
+    "source": "wbus-build-cmd",
+    "target": "wbus-serial-out"
+  },
+  {
+    "id": "link-serial-in-to-parse",
+    "type": "wires",
+    "source": "wbus-serial-in",
+    "target": "wbus-parse-response"
+  },
+  {
+    "id": "link-parse-to-sk",
+    "type": "wires",
+    "source": "wbus-parse-response",
+    "target": "wbus-to-signalk"
+  },
+  {
+    "id": "link-parse-to-store",
+    "type": "wires",
+    "source": "wbus-parse-response",
+    "target": "wbus-store-state"
+  },
+  {
+    "id": "link-parse-to-debug",
+    "type": "wires",
+    "source": "wbus-parse-response",
+    "target": "wbus-debug"
+  },
+  {
+    "id": "link-status-to-poll",
+    "type": "wires",
+    "source": "wbus-http-status",
+    "target": "wbus-poll-status"
+  },
+  {
+    "id": "link-poll-to-serial2",
+    "type": "wires",
+    "source": "wbus-poll-status",
+    "target": "wbus-serial-out-2"
+  },
+  {
+    "id": "link-auto-to-build",
+    "type": "wires",
+    "source": "wbus-auto-poll",
+    "target": "wbus-build-cmd"
+  }
+]

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="no" data-theme="light" data-mode="normal">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Summer">
+<meta name="theme-color" content="#003b7e">
+<title>Summer</title>
+<link rel="manifest" href="/manifest.json">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/main.css">
+<link rel="stylesheet" href="/css/dark.css">
+<link rel="stylesheet" href="/css/header-override.css">
+</head>
+<body>
+
+<!-- HEADER: brand | meta | right -->
+<header class="hdr">
+  <button class="hdr-brand" id="hdr-home-btn" title="Hjem" style="background:none;border:none;cursor:pointer;padding:0;text-align:left">
+    <span class="logo-n">Summer</span>
+    <span class="logo-prep"><span id="prep-word" style="transition:opacity .35s ease"></span> my life</span>
+  </button>
+
+  <div class="hdr-meta">
+    ☀ <span class="lm-v" id="hm-rise">—</span>
+    <span class="lm-sep"></span>
+    🌇 <span class="lm-v" id="hm-set">—</span>
+    <span class="lm-sep"></span>
+    🌊↑ <span class="lm-v" id="hm-hv">—</span>
+    <span class="lm-sep"></span>
+    🌊↓ <span class="lm-v" id="hm-lv">—</span>
+  </div>
+
+  <div class="hdr-r">
+    <div class="sk-ind">
+      <div class="sk-dot offline" id="sk-dot"></div>
+      <span id="sk-txt" style="display:none"></span>
+    </div>
+    <button class="ib" id="ai-btn" title="AI-assistent" style="font-size:.75rem">🤖</button>
+    <button class="ib" id="mode-btn" title="Utseende"><span id="mode-icon">☀</span></button>
+    <button class="ib" id="settings-btn" title="Innstillinger">⚙</button>
+  </div>
+</header>
+
+<!-- BOTTOM NAV — 14 sider (engine_health, anomaly, parts fjernet) -->
+<nav class="tnav">
+  <button class="nb" data-page="dashboard">    <span class="ni">◼</span>Hjem</button>
+  <button class="nb" data-page="electrical">   <span class="ni">⚡</span>Strøm</button>
+  <button class="nb" data-page="tanks">        <span class="ni">🛢</span>Tanker</button>
+  <button class="nb" data-page="engine">       <span class="ni">⚙</span>Motor</button>
+  <button class="nb" data-page="webasto">      <span class="ni">🔥</span>Webasto</button>
+  <button class="nb" data-page="weather">      <span class="ni">⛅</span>Vær</button>
+  <button class="nb" data-page="map">          <span class="ni">◎</span>Kart</button>
+  <button class="nb" data-page="events">       <span class="ni">◷</span>Logg</button>
+  <button class="nb" data-page="charts">       <span class="ni">◈</span>Grafer</button>
+  <button class="nb" data-page="trips">        <span class="ni">⚓</span>Turer</button>
+  <button class="nb" data-page="costs">        <span class="ni">💰</span>Kost</button>
+  <button class="nb" data-page="scanner">      <span class="ni">📷</span>Skann</button>
+  <button class="nb" data-page="docs">         <span class="ni">📁</span>Docs</button>
+  <button class="nb" data-page="maintenance">  <span class="ni">🔧</span>Service</button>
+  <button class="nb" data-page="vessel">       <span class="ni">◬</span>Båten</button>
+</nav>
+
+<nav class="sidebar" id="sidebar"></nav>
+
+<main>
+  <div id="page-dashboard"   class="page"></div>
+  <div id="page-electrical"  class="page"></div>
+  <div id="page-tanks"       class="page"></div>
+  <div id="page-engine"      class="page"></div>
+  <div id="page-webasto"     class="page"></div>
+  <div id="page-weather"     class="page"></div>
+  <div id="page-events"      class="page"></div>
+  <div id="page-charts"      class="page"></div>
+  <div id="page-trips"       class="page"></div>
+  <div id="page-map"         class="page"></div>
+  <div id="page-costs"       class="page"></div>
+  <div id="page-scanner"     class="page"></div>
+  <div id="page-docs"        class="page"></div>
+  <div id="page-maintenance" class="page"></div>
+  <div id="page-assistant"  class="page"></div>
+  <div id="page-vessel"      class="page"></div>
+</main>
+
+<!-- MODUSVELGER -->
+<div id="mode-panel" class="mode-panel">
+  <div class="mode-sheet">
+    <div class="mode-sheet-title">Utseende og modus
+      <button class="bb" id="mode-close" style="background:rgba(0,0,0,.1);border-color:var(--line);color:var(--ink)">✕</button>
+    </div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-light);margin-bottom:10px">Fargemodus</div>
+    <div class="mode-grid" style="margin-bottom:20px">
+      <button class="mode-btn selected" id="mb-light" onclick="setTheme('light')">
+        <div class="mode-btn-icon">☀️</div><div class="mode-btn-label">Dag</div>
+        <div class="mode-btn-sub">Hvit bakgrunn<br>for normalt bruk</div>
+      </button>
+      <button class="mode-btn" id="mb-dark" onclick="setTheme('dark')">
+        <div class="mode-btn-icon">🌙</div><div class="mode-btn-label">Natt</div>
+        <div class="mode-btn-sub">Mørk bakgrunn<br>for nattseilas</div>
+      </button>
+    </div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-light);margin-bottom:10px">Visningsstørrelse</div>
+    <div class="mode-grid" style="margin-bottom:20px">
+      <button class="mode-btn selected" id="mb-normal" onclick="setMode('normal')">
+        <div class="mode-btn-icon">📱</div><div class="mode-btn-label">Normal</div>
+        <div class="mode-btn-sub">Standard visning<br>med alle detaljer</div>
+      </button>
+      <button class="mode-btn" id="mb-large" onclick="setMode('large')">
+        <div class="mode-btn-icon">⛵</div><div class="mode-btn-label">Båtmodus</div>
+        <div class="mode-btn-sub">Store knapper<br>enkel navigering</div>
+      </button>
+    </div>
+    <button class="mode-close" id="mode-close-btn">Ferdig</button>
+  </div>
+</div>
+
+<!-- SETTINGS PANEL -->
+<div id="settings-panel" class="settings-panel">
+  <div class="set-hdr">
+    <button class="bb" id="settings-close">←</button>
+    <div class="set-hdr-t">Innstillinger</div>
+  </div>
+  <div class="set-body">
+    <div class="set-group"><div class="set-gt">Signal K</div>
+      <div class="set-field"><label>Server URL</label>
+        <input class="set-inp" id="cfg-signalk" type="text" placeholder="http://192.168.1.x:3000">
+        <div class="set-hint">Lokal dev: http://localhost:3000</div>
+      </div>
+    </div>
+    <div class="set-group"><div class="set-gt">Backend</div>
+      <div class="set-field"><label>Backend URL</label>
+        <input class="set-inp" id="cfg-backend" type="text" placeholder="http://localhost:3001">
+      </div>
+    </div>
+    <div class="set-group"><div class="set-gt">Claude AI</div>
+      <div class="set-field"><label>Anthropic API-nøkkel</label>
+        <input class="set-inp" id="cfg-apikey" type="password" placeholder="sk-ant-…">
+        <div class="set-hint">Hentes fra console.anthropic.com. Lagres kun lokalt.</div>
+      </div>
+    </div>
+    <div class="set-group"><div class="set-gt">Posisjon (fallback)</div>
+      <div class="set-field"><label>Breddegrad</label><input class="set-inp" id="cfg-lat" type="text" value="58.15"></div>
+      <div class="set-field"><label>Lengdegrad</label><input class="set-inp" id="cfg-lon" type="text" value="7.99"></div>
+    </div>
+    <div class="set-group"><div class="set-gt">Push-varsler</div>
+      <div class="set-field">
+        <button class="set-save" id="cfg-push-btn" style="margin-bottom:8px">Aktiver varsler</button>
+        <div class="set-hint" id="cfg-push-info">Motta push-varsler ved bilgepumpe, lav batteri og motoralarmer.</div>
+      </div>
+    </div>
+    <button class="set-save" id="settings-save">Lagre innstillinger</button>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script type="module">
+  import { init, showPage, closeSettings, toast } from '/js/app.js';
+  import { setConfig } from '/js/api.js';
+
+  const PREPS = [
+    'above','across','after','against','ahead of','along','amid','around','at','before',
+    'behind','below','beneath','beside','between','beyond','by','despite','down','during',
+    'except','for','from','in','inside','instead of','into','near','of','off',
+    'on','on top of','onto','out of','outside','over','past','per','through','throughout',
+    'to','toward','under','until','up','upon','via','with','within','without',
+    'fuck','wtf is','omg,','bruh,','meh,','ugh,','yikes,',
+    'lol at','lmao at','smh at','not today,','ok but','wait —',
+    'anyway,','honestly,','tbh,','ngl,','crying at','obsessed with','deeply into',
+    'at peace with','in denial about','overqualified for','unsubscribing from',
+    'adding extra cheese to','slightly above average at','powered by caffeine and',
+    'emotionally unavailable for','surprisingly ok with','still processing',
+  ];
+  let _pi = Math.floor(Math.random()*PREPS.length);
+  const prepEl = document.getElementById('prep-word');
+  function nextPrep() {
+    let n; do { n=Math.floor(Math.random()*PREPS.length); } while(n===_pi);
+    _pi=n; prepEl.style.opacity='0';
+    setTimeout(()=>{ prepEl.textContent=PREPS[_pi]; prepEl.style.opacity='1'; },350);
+  }
+  prepEl.textContent=PREPS[_pi]; prepEl.style.opacity='1';
+  setInterval(nextPrep, 4000);
+
+  const savedTheme=localStorage.getItem('theme')||'light';
+  const savedMode =localStorage.getItem('mode') ||'normal';
+  applyTheme(savedTheme); applyMode(savedMode);
+  window.setTheme=setTheme; window.setMode=setMode;
+
+  function applyTheme(t) {
+    document.documentElement.dataset.theme=t;
+    const icon=document.getElementById('mode-icon');
+    if(icon) icon.textContent=t==='dark'?'🌙':'☀';
+    document.getElementById('mb-light')?.classList.toggle('selected',t==='light');
+    document.getElementById('mb-dark')?.classList.toggle('selected',t==='dark');
+    const meta=document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.content=t==='dark'?'#001a3d':'#003b7e';
+  }
+  function applyMode(m) {
+    document.documentElement.dataset.mode=m;
+    document.getElementById('mb-normal')?.classList.toggle('selected',m==='normal');
+    document.getElementById('mb-large')?.classList.toggle('selected',m==='large');
+  }
+  function setTheme(t) { localStorage.setItem('theme',t); applyTheme(t); }
+  function setMode(m)  { localStorage.setItem('mode',m);  applyMode(m);  }
+
+  const modePanel=document.getElementById('mode-panel');
+  document.getElementById('mode-btn').addEventListener('click',()=>modePanel.classList.add('open'));
+  const closeMode=()=>modePanel.classList.remove('open');
+  document.getElementById('mode-close').addEventListener('click',closeMode);
+  document.getElementById('mode-close-btn').addEventListener('click',closeMode);
+  modePanel.addEventListener('click',e=>{ if(e.target===modePanel) closeMode(); });
+
+  // AI-knapp i header → naviger til assistant-siden
+  document.getElementById('ai-btn').addEventListener('click',()=>showPage('assistant'));
+
+  // Summer-logo → hjem
+  document.getElementById('hdr-home-btn').addEventListener('click',()=>showPage('dashboard'));
+
+  document.getElementById('cfg-signalk').value=localStorage.getItem('signalk_url')||'http://localhost:3000';
+  document.getElementById('cfg-backend').value =localStorage.getItem('backend_url')||'http://localhost:3001';
+  document.getElementById('cfg-apikey').value  =localStorage.getItem('api_key')    ||'';
+  document.getElementById('cfg-lat').value     =localStorage.getItem('wx_lat')     ||'58.15';
+  document.getElementById('cfg-lon').value     =localStorage.getItem('wx_lon')     ||'7.99';
+
+  document.getElementById('settings-btn').addEventListener('click',()=>document.getElementById('settings-panel').classList.add('open'));
+  document.getElementById('settings-close').addEventListener('click',closeSettings);
+  document.getElementById('settings-save').addEventListener('click',()=>{
+    setConfig('signalk',  document.getElementById('cfg-signalk').value.trim());
+    setConfig('backend',  document.getElementById('cfg-backend').value.trim());
+    setConfig('anthropic',document.getElementById('cfg-apikey').value.trim());
+    localStorage.setItem('wx_lat',document.getElementById('cfg-lat').value.trim());
+    localStorage.setItem('wx_lon',document.getElementById('cfg-lon').value.trim());
+    closeSettings(); toast('Innstillinger lagret','ok');
+    setTimeout(()=>location.reload(),500);
+  });
+
+  init();
+</script>
+</body>
+</html>

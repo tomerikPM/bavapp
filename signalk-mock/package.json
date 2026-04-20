@@ -1,0 +1,18 @@
+{
+  "name": "bavaria32-signalk-mock",
+  "version": "1.0.0",
+  "description": "Signal K mock server for Bavaria Sport 32 development",
+  "main": "mock-server.js",
+  "scripts": {
+    "start": "node mock-server.js",
+    "dev": "nodemon mock-server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.3",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
