@@ -41,9 +41,11 @@ du har generert nøkkel med `ssh-keygen -t ed25519`).
 
 1. Logg inn på [railway.app](https://railway.app)
 2. **New Project → Deploy from GitHub repo** → velg `tomerikPM/bavapp`
-3. Railway plukker opp `railway.json` og bruker:
-   - Build: `cd backend && npm install --omit=dev`
-   - Start: `cd backend && node server.js`
+3. **Viktig:** Service → Settings → Source → **Add Root Directory = `backend`**
+   (uten dette feiler Nixpacks med "npm: command not found" fordi `package.json` er i `backend/`)
+4. Railway plukker opp `railway.json` og bruker:
+   - Build: `npm install --omit=dev`
+   - Start: `node server.js`
    - Healthcheck: `/api/health`
 
 ## 3. Opprett persistent Volume
