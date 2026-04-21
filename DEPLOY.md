@@ -131,6 +131,30 @@ ls -lh bavapp-backup.tar.gz   # bør være ~20-30 MB
 
 **Verifiser**: `curl -u bavapp:<pass> https://.../api/admin/status` viser DB-størrelse og filtall.
 
+## 6b. Sync lokale endringer til Railway
+
+All dataredigering skjer lokalt. Railway er visnings-speil, oppdatert via sync-script.
+
+### Engangsoppsett
+Behold `ENABLE_ADMIN_RESTORE=1` i Railway Variables (Basic Auth + sterkt passord beskytter endepunktet).
+
+### Hver gang du vil sync-e
+```bash
+export SITE_PASSWORD="<ditt-passord>"
+./sync-to-railway.sh
+```
+
+Scriptet:
+1. Verifiserer at lokal backend kjører
+2. Lager tar.gz-backup via `/api/admin/backup`
+3. Laster opp til Railway via `/api/admin/restore`
+4. Venter på restart
+5. Verifiserer at DB-størrelse + tabell-rader er på plass
+
+**NB:** Restore overskriver hele Railway-DB-en. Ikke rediger data via Railway-UI — det går tapt ved neste sync.
+
+Bruk `RAILWAY_URL` eller `SITE_USER` env-variabler for å overstyre defaults hvis du har custom domain eller annen bruker.
+
 ## 7. Custom domain (valgfritt)
 
 Railway → **Settings → Domains → + Custom Domain**. Gratis HTTPS via Let's Encrypt.
