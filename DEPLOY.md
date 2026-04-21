@@ -18,6 +18,25 @@ git commit -m "deploy: passord-gate, railway-config, backend_url bootstrap"
 git push origin main
 ```
 
+### Hvis push feiler med "Permission denied (publickey)"
+
+Remote-en er SSH-basert, men ingen SSH-nøkkel er registrert mot GitHub-kontoen din.
+Løsning: bytt til HTTPS — `gh`-CLI sin credential-helper håndterer tokenet automatisk.
+
+```bash
+# Sjekk at gh er autentisert
+gh auth status
+
+# Bytt til HTTPS (engangs)
+git remote set-url origin https://github.com/<brukernavn>/<repo>.git
+
+# Prøv push på nytt
+git push origin main
+```
+
+Alternativt, for SSH på sikt: `gh ssh-key add ~/.ssh/id_ed25519.pub` (etter at
+du har generert nøkkel med `ssh-keygen -t ed25519`).
+
 ## 2. Opprett Railway-prosjekt
 
 1. Logg inn på [railway.app](https://railway.app)
