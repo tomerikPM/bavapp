@@ -92,10 +92,14 @@ router.post('/restore', upload.single('archive'), async (req, res) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     fs.mkdirSync(UPLOADS, { recursive: true });
 
-    // Kopier DB på plass (overskriver eksisterende)
-    fs.copyFileSync(newDb, DB_PATH);
+    // VIKTIG: Legg DB-en til side som staging-fil — IKKE overskriv /data/bavaria32.db
+    // mens server-prosessen har en åpen tilkobling til den (better-sqlite3 cacher
+    // sider som ellers ville skrive tilbake og overskrive våre restore-verdier).
+    // Atomisk rename gjøres i shutdown-steget etter db.close().
+    const stagingDb = DB_PATH + '.new';
+    fs.copyFileSync(newDb, stagingDb);
 
-    // Kopier uploads (merge — overskriver duplikater, beholder eksisterende som ikke er i arkivet)
+    // Uploads er filbasert — ingen SQLite-konflikt, kan kopieres direkte
     let photoCount = 0;
     if (fs.existsSync(newUploads)) {
       fs.cpSync(newUploads, UPLOADS, { recursive: true, force: true });
@@ -104,21 +108,27 @@ router.post('/restore', upload.single('archive'), async (req, res) => {
 
     rmSafe(tmp);
 
-    const dbSize = fs.statSync(DB_PATH).size;
+    const dbSize = fs.statSync(stagingDb).size;
     res.json({
       ok: true,
-      message: 'Gjenoppretting fullført. Server restarter om 2 sekunder — last appen på nytt deretter.',
+      message: 'Gjenoppretting fullført. Server restarter innen 1 sekund — last appen på nytt deretter.',
       db_size_bytes: dbSize,
       photo_count:   photoCount,
     });
 
-    // Avslutter prosessen etter at responsen har rukket ut.
-    // NB: Railway restartPolicy ON_FAILURE krever exit != 0 for å trigge restart.
-    // ALWAYS restart-er uansett, men vi bruker exit(1) for å være sikker.
+    // Shutdown-steget: close DB → atomic rename staging over live DB → exit.
+    // Fordi vi har rename her (ikke copyFileSync + open handle), er det ingen
+    // race mellom cachede DB-sider og det restorerte filinnholdet.
     setTimeout(() => {
-      console.log('[admin/restore] Restarter for å koble til ny DB…');
+      try { db.close(); } catch (e) { console.warn('[admin/restore] db.close feilet:', e.message); }
+      try {
+        fs.renameSync(stagingDb, DB_PATH);
+        console.log('[admin/restore] DB erstattet. Restarter…');
+      } catch (e) {
+        console.error('[admin/restore] rename feilet:', e.message);
+      }
       process.exit(1);
-    }, 2000);
+    }, 500);
   } catch (e) {
     rmSafe(tmp);
     console.error('[admin/restore] feilet:', e);
