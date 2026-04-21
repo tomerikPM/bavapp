@@ -20,6 +20,7 @@ const PAGES = {
   maintenance:   () => import('./pages/maintenance.js'),
   vessel:        () => import('./pages/vessel.js?v=9'),
   system:        () => import('./pages/system.js'),
+  cameras:       () => import('./pages/cameras.js'),
 };
 
 const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine', 'map'];
