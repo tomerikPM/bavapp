@@ -113,10 +113,11 @@ router.post('/restore', upload.single('archive'), async (req, res) => {
     });
 
     // Avslutter prosessen etter at responsen har rukket ut.
-    // Railway (restartPolicyType ON_FAILURE) starter containeren på nytt, som reconnecter til den nye DB-fila.
+    // NB: Railway restartPolicy ON_FAILURE krever exit != 0 for å trigge restart.
+    // ALWAYS restart-er uansett, men vi bruker exit(1) for å være sikker.
     setTimeout(() => {
       console.log('[admin/restore] Restarter for å koble til ny DB…');
-      process.exit(0);
+      process.exit(1);
     }, 2000);
   } catch (e) {
     rmSafe(tmp);
