@@ -1,0 +1,13 @@
+{
+  "name": "bavapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bavaria Sport 32 boat app — monorepo-root for Railway",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "cd backend && npm install --omit=dev",
+    "start": "cd backend && node server.js"
+  }
+}
