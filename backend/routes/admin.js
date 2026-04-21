@@ -142,6 +142,16 @@ router.get('/status', (req, res) => {
   let dbSize = null, uploadsCount = null;
   try { dbSize = fs.statSync(DB_PATH).size; } catch {}
   try { uploadsCount = countFiles(UPLOADS); } catch {}
+
+  // Frontend-diagnostikk
+  const frontendPath = path.resolve(__dirname, '../../frontend');
+  const indexHtml    = path.join(frontendPath, 'index.html');
+  const appJs        = path.join(frontendPath, 'js', 'app.js');
+  let frontendListing = null;
+  try {
+    frontendListing = fs.readdirSync(frontendPath).slice(0, 20);
+  } catch {}
+
   res.json({
     db_path:            DB_PATH,
     db_exists:          fs.existsSync(DB_PATH),
@@ -150,6 +160,14 @@ router.get('/status', (req, res) => {
     uploads_exists:     fs.existsSync(UPLOADS),
     uploads_file_count: uploadsCount,
     restore_enabled:    process.env.ENABLE_ADMIN_RESTORE === '1',
+
+    frontend_path:       frontendPath,
+    frontend_exists:     fs.existsSync(frontendPath),
+    frontend_index_html: fs.existsSync(indexHtml),
+    frontend_app_js:     fs.existsSync(appJs),
+    frontend_listing:    frontendListing,
+    cwd:                 process.cwd(),
+    dirname:             __dirname,
   });
 });
 
