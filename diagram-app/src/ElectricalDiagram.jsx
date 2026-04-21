@@ -8,8 +8,9 @@ import {
   MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useEffect } from 'react';
 import BavNode from './BavNode.jsx';
-import { electricalNodes, electricalEdges } from './electricalData.js';
+import { useDiagramData } from './useDiagramData.js';
 
 const nodeTypes = { bavNode: BavNode };
 
@@ -19,8 +20,16 @@ const defaultEdgeOptions = {
 };
 
 export default function ElectricalDiagram() {
-  const [nodes, , onNodesChange] = useNodesState(electricalNodes);
-  const [edges, , onEdgesChange] = useEdgesState(electricalEdges);
+  const { nodes: apiNodes, edges: apiEdges, loading, error } = useDiagramData('electrical');
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  // Reflektér API-data inn i React Flow-state når det endres
+  useEffect(() => { setNodes(apiNodes); }, [apiNodes, setNodes]);
+  useEffect(() => { setEdges(apiEdges); }, [apiEdges, setEdges]);
+
+  if (loading && !nodes.length) return <div style={loadStyle}>Henter elektrisk diagram…</div>;
+  if (error   && !nodes.length) return <div style={loadStyle}>⚠ {error}</div>;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -65,3 +74,10 @@ export default function ElectricalDiagram() {
     </div>
   );
 }
+
+const loadStyle = {
+  display:'flex', alignItems:'center', justifyContent:'center',
+  height:'100%', color:'#8a8a8a',
+  fontFamily:'Barlow Condensed, sans-serif', fontSize:13,
+  letterSpacing:'.1em', textTransform:'uppercase',
+};

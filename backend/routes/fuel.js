@@ -15,13 +15,25 @@ const express = require('express');
 const https   = require('https');
 const http    = require('http');
 const db      = require('../db');
+const { scrapeBunkring } = require('../scrapers/bunkring');
 const router  = express.Router();
 
-// ── Sesongregler ────────────────────────────────────────────────────────────
+// ── Sesongregler (pumpepriser) ──────────────────────────────────────────────
 const SEASON_START_MM = 4; const SEASON_START_DD = 15; // 15. april
 const SEASON_END_MM   = 10; const SEASON_END_DD   = 1;  // 1. oktober
-const TTL_SEASON_MS   = 12 * 3600_000;   // 12 timer i sesong
+const TTL_SEASON_MS    = 12 * 3600_000;   // 12 timer i sesong
 const TTL_OFFSEASON_MS = 7  * 86400_000;  // 7 dager utenom sesong
+const TTL_BUNKRING_MS  = 24 * 3600_000;   // Bunkring oppdateres daglig (brukersubmittert)
+
+// ── Scrape-radius rundt båtens siste kjente GPS-posisjon ────────────────────
+// Begrenser bunkring-scraperen til marinaer nær båten for å spare requests.
+// Siste posisjon oppdateres hver gang frontend kaller /prices (live GPS eller
+// brukerkonfigurert hjemmehavn-fallback). Fallback hvis aldri kalt: Kristiansand.
+const SCRAPE_RADIUS_KM = parseFloat(process.env.SCRAPE_RADIUS_KM) || 50;
+const FALLBACK_LAT     = parseFloat(process.env.FALLBACK_LAT) || 58.1467;  // Kristiansand
+const FALLBACK_LON     = parseFloat(process.env.FALLBACK_LON) || 7.9956;
+
+let _lastKnownPosition = { lat: FALLBACK_LAT, lon: FALLBACK_LON, ts: null };
 
 function isBoatSeason(d = new Date()) {
   const mm = d.getMonth() + 1;
@@ -53,7 +65,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_fuel_scraped ON fuel_cache(scraped_at DESC);
 `);
 
-// Migrasjon: legg til price_updated_at hvis den mangler
+// Migrasjon: legg til kolonner hvis de mangler
 try {
   const cols = db.prepare(`PRAGMA table_info(fuel_cache)`).all();
   if (!cols.some(c => c.name === 'price_updated_at')) {
@@ -63,6 +75,19 @@ try {
   if (!cols.some(c => c.name === 'raw_timestamp')) {
     db.exec(`ALTER TABLE fuel_cache ADD COLUMN raw_timestamp TEXT`);
     console.log('[fuel] Migrasjon: la til kolonne raw_timestamp');
+  }
+  if (!cols.some(c => c.name === 'source')) {
+    db.exec(`ALTER TABLE fuel_cache ADD COLUMN source TEXT`);
+    db.exec(`UPDATE fuel_cache SET source = 'pumpepriser' WHERE source IS NULL`);
+    console.log('[fuel] Migrasjon: la til kolonne source (eksisterende rader = pumpepriser)');
+  }
+  if (!cols.some(c => c.name === 'fuel_grade')) {
+    db.exec(`ALTER TABLE fuel_cache ADD COLUMN fuel_grade TEXT`);
+    console.log('[fuel] Migrasjon: la til kolonne fuel_grade');
+  }
+  if (!cols.some(c => c.name === 'slug')) {
+    db.exec(`ALTER TABLE fuel_cache ADD COLUMN slug TEXT`);
+    console.log('[fuel] Migrasjon: la til kolonne slug');
   }
 } catch (e) {
   console.error('[fuel] Migrasjonsfeil:', e.message);
@@ -186,6 +211,46 @@ async function parallelLimit(items, limit, fn) {
   const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
   await Promise.all(workers);
   return results;
+}
+
+// ── Cross-source dedup ──────────────────────────────────────────────────────
+// Samme marina registreres ofte på både pumpepriser.no og bunkring.no. Vi
+// matcher på normalisert navn (lowercase, strippet for marina-/gjestehavn-
+// suffikser) og beholder raden med nyeste bekreftelses-tidsstempel.
+function normalizeStationName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/\s+(marina|gjestehavn|småbåthavn|smabathavn|båtforening|batforening|bryggen?|havn|kai)$/i, '')
+    .replace(/[^a-zæøå0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function rowTimestamp(r) {
+  // Nyeste pålitelige tidsstempel: bunkring bruker raw_timestamp, pumpepriser
+  // har den ikke her (historikken hentes senere). Fall tilbake til price_updated_at.
+  return r.raw_timestamp || r.price_updated_at || '';
+}
+
+function dedupeAcrossSources(rows) {
+  const byKey = new Map();  // normName → [rows]
+  for (const r of rows) {
+    const key = normalizeStationName(r.name);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(r);
+  }
+
+  const drop = new Set();  // station_ids som skal fjernes
+  for (const [, group] of byKey) {
+    if (group.length < 2) continue;
+    const hasBoth = group.some(r => r.source === 'bunkring') &&
+                    group.some(r => r.source === 'pumpepriser');
+    if (!hasBoth) continue;  // bare dedupliser når begge kilder har navnet
+    group.sort((a, b) => rowTimestamp(b).localeCompare(rowTimestamp(a)));
+    for (let i = 1; i < group.length; i++) drop.add(group[i].station_id);
+  }
+  return rows.filter(r => !drop.has(r.station_id));
 }
 
 // ── Haversine-avstand (km) ──────────────────────────────────────────────────
@@ -376,10 +441,14 @@ function parseStations(raw) {
 }
 
 // ── Lagre til cache-tabell ───────────────────────────────────────────────────
-// Pumpepriser.no-APIet har ikke tidsstempel per stasjon. Vi sporer derfor selv:
-// hvis prisen er lik forrige skraping → behold forrige price_changed_at.
-// Hvis prisen har endret seg (eller stasjonen er ny) → sett price_changed_at = now.
-function saveToCache(stations, scrapedAt) {
+// Ingen av kildene gir tidsstempel per pris, så vi sporer selv:
+// pris lik forrige skraping → behold forrige price_updated_at.
+// pris endret / ny stasjon  → sett price_updated_at = now.
+//
+// Kilder:
+//   pumpepriser  — stasjoner har numeric station_id; koordinater slås opp fra kommune
+//   bunkring     — stasjoner har "bunkring-{id}" station_id; lat/lon kommer direkte
+function saveToCache(stations, scrapedAt, source = 'pumpepriser') {
   const prevStmt = db.prepare(`
     SELECT diesel, petrol, price_updated_at
     FROM fuel_cache
@@ -390,29 +459,34 @@ function saveToCache(stations, scrapedAt) {
 
   const ins = db.prepare(`
     INSERT OR REPLACE INTO fuel_cache
-      (scraped_at, station_id, name, municipality, county, diesel, petrol, lat, lon, price_updated_at, raw_timestamp)
+      (scraped_at, station_id, name, municipality, county, diesel, petrol,
+       lat, lon, price_updated_at, raw_timestamp, source, fuel_grade, slug)
     VALUES
-      (@scraped_at, @station_id, @name, @municipality, @county, @diesel, @petrol, @lat, @lon, @price_updated_at, @raw_timestamp)
+      (@scraped_at, @station_id, @name, @municipality, @county, @diesel, @petrol,
+       @lat, @lon, @price_updated_at, @raw_timestamp, @source, @fuel_grade, @slug)
   `);
   const tx = db.transaction(rows => { for (const r of rows) ins.run(r); });
 
   let changed = 0, unchanged = 0, newlySeen = 0;
 
   const rows = stations.map(s => {
-    const coords = getMuniCoords(s.municipality);
-    const prev   = prevStmt.get(s.station_id);
+    // Koordinater: bunkring leverer dem; pumpepriser trenger oppslag på kommune
+    let lat = s.lat ?? null;
+    let lon = s.lon ?? null;
+    if (lat == null && lon == null && s.municipality) {
+      const coords = getMuniCoords(s.municipality);
+      if (coords) { lat = coords[0]; lon = coords[1]; }
+    }
 
+    const prev = prevStmt.get(s.station_id);
     let priceChangedAt;
     if (!prev) {
-      // Ny stasjon — første gang vi ser den
       priceChangedAt = scrapedAt;
       newlySeen++;
     } else if (prev.diesel === s.diesel && prev.petrol === s.petrol) {
-      // Pris uendret — arv forrige tidsstempel
       priceChangedAt = prev.price_updated_at || scrapedAt;
       unchanged++;
     } else {
-      // Pris endret — ny tidsstempel
       priceChangedAt = scrapedAt;
       changed++;
     }
@@ -425,77 +499,114 @@ function saveToCache(stations, scrapedAt) {
       county:           s.county,
       diesel:           s.diesel,
       petrol:           s.petrol,
-      lat:              coords ? coords[0] : null,
-      lon:              coords ? coords[1] : null,
+      lat,
+      lon,
       price_updated_at: priceChangedAt,
-      raw_timestamp:    null,
+      raw_timestamp:    s.raw_timestamp || null,
+      source:           s.source || source,
+      fuel_grade:       s.fuel_grade || null,
+      slug:             s.slug       || null,
     };
   });
   tx(rows);
-  console.log(`[fuel] Lagret ${rows.length} stasjoner (${scrapedAt}) — ${changed} endret, ${unchanged} uendret, ${newlySeen} nye`);
+  console.log(`[fuel:${source}] Lagret ${rows.length} stasjoner (${scrapedAt}) — ${changed} endret, ${unchanged} uendret, ${newlySeen} nye`);
 }
 
-// ── Sjekk om cache er gyldig ─────────────────────────────────────────────────
-function getLatestScrapeTime() {
-  const row = db.prepare(`SELECT MAX(scraped_at) as ts FROM fuel_cache`).get();
+// ── Sjekk om cache er gyldig (per kilde) ────────────────────────────────────
+function getLatestScrapeTime(source) {
+  const row = source
+    ? db.prepare(`SELECT MAX(scraped_at) as ts FROM fuel_cache WHERE source = ?`).get(source)
+    : db.prepare(`SELECT MAX(scraped_at) as ts FROM fuel_cache`).get();
   return row?.ts || null;
 }
 
-function cacheIsValid() {
-  const latest = getLatestScrapeTime();
+function cacheIsValid(source) {
+  const latest = getLatestScrapeTime(source);
   if (!latest) return false;
   const age = Date.now() - new Date(latest).getTime();
-  return age < cacheTtlMs();
+  const ttl = source === 'bunkring' ? TTL_BUNKRING_MS : cacheTtlMs();
+  return age < ttl;
 }
 
-// ── Hoved-skrape-funksjon ────────────────────────────────────────────────────
-let _scraping = false;
+// ── Skrape-funksjoner per kilde ──────────────────────────────────────────────
+let _scraping         = false;
+let _scrapingBunkring = false;
 
 async function scrapeAndCache() {
   if (_scraping) return;
   _scraping = true;
   const startTime = Date.now();
   try {
-    console.log('[fuel] Starter henting fra pumpepriser.no/database/pumpepriser.php…');
+    console.log('[fuel:pumpepriser] Starter henting fra pumpepriser.no…');
     const raw      = await fetchStationsJson();
     const stations = parseStations(raw);
     if (stations.length < 50) throw new Error(`For få stasjoner parsert: ${stations.length}`);
 
     const scrapedAt = new Date().toISOString();
-    saveToCache(stations, scrapedAt);
-    console.log(`[fuel] Skraping ferdig: ${stations.length} stasjoner på ${Date.now()-startTime}ms`);
+    saveToCache(stations, scrapedAt, 'pumpepriser');
+    console.log(`[fuel:pumpepriser] Ferdig: ${stations.length} stasjoner på ${Date.now()-startTime}ms`);
     return { ok: true, count: stations.length, scrapedAt };
   } catch (e) {
-    console.error('[fuel] Skraping feilet:', e.message);
+    console.error('[fuel:pumpepriser] Feilet:', e.message);
     return { ok: false, error: e.message };
   } finally {
     _scraping = false;
   }
 }
 
+async function scrapeBunkringAndCache() {
+  if (_scrapingBunkring) return;
+  _scrapingBunkring = true;
+  const startTime = Date.now();
+  try {
+    const { lat: centerLat, lon: centerLon } = _lastKnownPosition;
+    console.log(`[fuel:bunkring] Starter henting (radius ${SCRAPE_RADIUS_KM}km rundt ${centerLat.toFixed(3)},${centerLon.toFixed(3)})…`);
+    const stations = await scrapeBunkring({
+      centerLat,
+      centerLon,
+      maxRadiusKm: SCRAPE_RADIUS_KM,
+    });
+    if (stations.length === 0) throw new Error('Ingen marinaer med priser');
+
+    const scrapedAt = new Date().toISOString();
+    saveToCache(stations, scrapedAt, 'bunkring');
+    console.log(`[fuel:bunkring] Ferdig: ${stations.length} marinaer på ${Date.now()-startTime}ms`);
+    return { ok: true, count: stations.length, scrapedAt };
+  } catch (e) {
+    console.error('[fuel:bunkring] Feilet:', e.message);
+    return { ok: false, error: e.message };
+  } finally {
+    _scrapingBunkring = false;
+  }
+}
+
 // ── Periodisk scheduler ───────────────────────────────────────────────────────
 let _schedulerTimer = null;
 
+async function refreshIfStale() {
+  if (!cacheIsValid('pumpepriser')) {
+    const season = isBoatSeason();
+    const ttlH   = season ? 12 : 168;
+    console.log(`[fuel:pumpepriser] Cache utløpt (${season ? 'sesong' : 'vinter'}, TTL ${ttlH}t) — skraper…`);
+    await scrapeAndCache();
+  }
+  if (!cacheIsValid('bunkring')) {
+    console.log('[fuel:bunkring] Cache utløpt (TTL 24t) — skraper…');
+    await scrapeBunkringAndCache();
+  }
+}
+
 function startScheduler() {
-  // Sjekk hvert 30. minutt om cache trenger oppdatering
-  _schedulerTimer = setInterval(async () => {
-    if (!cacheIsValid()) {
-      const season = isBoatSeason();
-      const ttlH = season ? 12 : 168;
-      console.log(`[fuel] Cache utløpt (${season ? 'sesong' : 'vinter'}, TTL ${ttlH}t) — skraper…`);
-      await scrapeAndCache();
-    }
-  }, 30 * 60_000);
+  // Sjekk hvert 30. minutt om noen av kildene trenger oppdatering
+  _schedulerTimer = setInterval(() => { refreshIfStale().catch(() => {}); }, 30 * 60_000);
 
   // Initial sjekk ved oppstart (etter 5 sekunder for å ikke forsinke oppstart)
-  setTimeout(async () => {
-    if (!cacheIsValid()) {
-      console.log('[fuel] Ingen gyldig cache ved oppstart — starter skraping…');
-      await scrapeAndCache();
-    } else {
-      const latest = getLatestScrapeTime();
-      console.log(`[fuel] Cache gyldig (sist oppdatert: ${latest})`);
-    }
+  setTimeout(() => {
+    const pump  = getLatestScrapeTime('pumpepriser');
+    const bunk  = getLatestScrapeTime('bunkring');
+    if (pump) console.log(`[fuel:pumpepriser] Siste skrape: ${pump}`);
+    if (bunk) console.log(`[fuel:bunkring] Siste skrape: ${bunk}`);
+    refreshIfStale().catch(() => {});
   }, 5000);
 }
 
@@ -556,42 +667,70 @@ router.get('/debug-html', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/fuel/prices?lat=58.15&lon=7.99&radius=150&limit=30&withHistory=1
+// GET /api/fuel/prices?lat=58.15&lon=7.99&radius=150&limit=30&source=all&withHistory=1
+//
+// source: 'all' (default) | 'road' (pumpepriser) | 'marine' (bunkring)
 router.get('/prices', async (req, res) => {
-  const lat         = parseFloat(req.query.lat || '58.15');
-  const lon         = parseFloat(req.query.lon || '7.99');
-  const radius      = parseFloat(req.query.radius || '200'); // km
+  const lat         = parseFloat(req.query.lat || String(FALLBACK_LAT));
+  const lon         = parseFloat(req.query.lon || String(FALLBACK_LON));
+  const radius      = parseFloat(req.query.radius || '50'); // km
   const limit       = parseInt(req.query.limit || '40');
-  const withHistory = req.query.withHistory !== '0';  // default på
 
-  // Hent siste scrape-batch
-  const latest = getLatestScrapeTime();
-  if (!latest) {
-    // Ingen data ennå — start skraping og returner tom liste
-    scrapeAndCache().catch(() => {});
-    return res.json({ data: [], status: 'scraping', message: 'Henter priser første gang — prøv igjen om 15 sekunder.' });
+  // Oppdater siste kjente båtposisjon så scheduleren kan fokusere neste bunkring-scrape
+  if (isFinite(lat) && isFinite(lon) && Math.abs(lat) > 1) {
+    _lastKnownPosition = { lat, lon, ts: new Date().toISOString() };
+  }
+  const withHistory = req.query.withHistory !== '0';
+  const sourceParam = (req.query.source || 'all').toLowerCase();
+  const wantRoad    = sourceParam === 'all' || sourceParam === 'road';
+  const wantMarine  = sourceParam === 'all' || sourceParam === 'marine';
+
+  const latestPump     = wantRoad   ? getLatestScrapeTime('pumpepriser') : null;
+  const latestBunkring = wantMarine ? getLatestScrapeTime('bunkring')    : null;
+
+  if (!latestPump && !latestBunkring) {
+    if (wantRoad)   scrapeAndCache().catch(() => {});
+    if (wantMarine) scrapeBunkringAndCache().catch(() => {});
+    return res.json({
+      data: [], status: 'scraping',
+      message: 'Henter priser første gang — prøv igjen om 1–2 minutter.',
+    });
   }
 
-  // Hent alle stasjoner fra siste batch
-  const rows = db.prepare(`
-    SELECT * FROM fuel_cache WHERE scraped_at = ? AND (diesel IS NOT NULL OR petrol IS NOT NULL)
-  `).all(latest);
+  const rowsQuery = db.prepare(`
+    SELECT * FROM fuel_cache
+    WHERE scraped_at = ? AND source = ?
+      AND (diesel IS NOT NULL OR petrol IS NOT NULL)
+  `);
 
-  // Beregn avstand og filtrer
-  const withDist = rows
+  let rows = [];
+  if (latestPump)     rows = rows.concat(rowsQuery.all(latestPump,     'pumpepriser'));
+  if (latestBunkring) rows = rows.concat(rowsQuery.all(latestBunkring, 'bunkring'));
+
+  // Dedupliser: samme marina kan finnes i begge kilder. Match på normalisert navn,
+  // behold raden med nyeste bekreftelses-/tidsstempel. Innen samme kilde finnes
+  // ikke duplikater (station_id er unik).
+  const deduped = dedupeAcrossSources(rows);
+
+  // Avstand + filtrering + sortering
+  const withDist = deduped
     .map(r => ({
       ...r,
+      source:     r.source || 'pumpepriser',
       distanceKm: (r.lat && r.lon) ? haversine(lat, lon, r.lat, r.lon) : 9999,
     }))
     .filter(r => r.distanceKm <= radius)
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, limit);
 
-  // Hent stasjonshistorikk (bekreftelsesdatoer) parallelt med concurrency-grense
-  let histories = [];
+  // Stasjonshistorikk gjelder bare pumpepriser (crowd-sourced bekreftelser)
+  let histories = new Array(withDist.length).fill(null);
   if (withHistory && withDist.length) {
     const t0 = Date.now();
-    histories = await parallelLimit(withDist, 5, s => getStationHistory(s.station_id));
+    histories = await parallelLimit(withDist, 5, async s => {
+      if (s.source !== 'pumpepriser') return null;
+      return getStationHistory(s.station_id);
+    });
     const fetched = histories.filter(h => h && !h.error).length;
     console.log(`[fuel] Historikk hentet for ${fetched}/${withDist.length} stasjoner på ${Date.now()-t0}ms`);
   }
@@ -599,20 +738,25 @@ router.get('/prices', async (req, res) => {
   res.json({
     data: withDist.map((s, i) => {
       const h = histories[i];
+      // Bunkring eksponerer raw_timestamp som lastDieselConfirmedAt så frontend
+      // kan bruke samme freshness-UI for begge kilder.
+      const isBunkring = s.source === 'bunkring';
       return {
         ...s,
-        priceChangedAt:            s.price_updated_at,  // vår egen sporing (sekundært)
-        lastDieselConfirmedAt:     h?.last_diesel_confirmed_at || null,
-        lastDieselConfirmedBy:     h?.last_diesel_confirmed_by || null,
-        lastPetrolConfirmedAt:     h?.last_petrol_confirmed_at || null,
-        lastPetrolConfirmedBy:     h?.last_petrol_confirmed_by || null,
+        priceChangedAt:        s.price_updated_at,
+        lastDieselConfirmedAt: isBunkring ? (s.raw_timestamp || null) : (h?.last_diesel_confirmed_at || null),
+        lastDieselConfirmedBy: isBunkring ? 'bunkring.no'             : (h?.last_diesel_confirmed_by || null),
+        lastPetrolConfirmedAt: isBunkring ? null                      : (h?.last_petrol_confirmed_at || null),
+        lastPetrolConfirmedBy: isBunkring ? null                      : (h?.last_petrol_confirmed_by || null),
       };
     }),
-    count:     withDist.length,
-    total:     rows.length,
-    scrapedAt: latest,
-    cacheAge:  Math.round((Date.now() - new Date(latest).getTime()) / 60_000) + ' min',
-    nextScrapeIn: Math.round(Math.max(0, cacheTtlMs() - (Date.now() - new Date(latest).getTime())) / 60_000) + ' min',
+    count:   withDist.length,
+    total:   rows.length,
+    sources: {
+      pumpepriser: latestPump     ? { scrapedAt: latestPump,     ttlHours: cacheTtlMs() / 3600_000 } : null,
+      bunkring:    latestBunkring ? { scrapedAt: latestBunkring, ttlHours: TTL_BUNKRING_MS / 3600_000 } : null,
+    },
+    scrapedAt: latestPump || latestBunkring,  // for bakoverkompatibilitet
     season:    isBoatSeason(),
     position:  { lat, lon, radiusKm: radius },
   });
@@ -715,33 +859,43 @@ router.get('/debug-html', async (req, res) => {
   }
 });
 
-// GET /api/fuel/status — cache-status og scheduler-info
+// GET /api/fuel/status — cache-status og scheduler-info per kilde
 router.get('/status', (req, res) => {
-  const latest  = getLatestScrapeTime();
-  const season  = isBoatSeason();
-  const ttl     = cacheTtlMs();
-  const age     = latest ? Date.now() - new Date(latest).getTime() : null;
-  const valid   = cacheIsValid();
-  const count   = latest
-    ? db.prepare('SELECT COUNT(*) as n FROM fuel_cache WHERE scraped_at = ?').get(latest)?.n
-    : 0;
+  function statusFor(source, ttl) {
+    const latest = getLatestScrapeTime(source);
+    const age    = latest ? Date.now() - new Date(latest).getTime() : null;
+    const count  = latest
+      ? db.prepare('SELECT COUNT(*) as n FROM fuel_cache WHERE scraped_at = ? AND source = ?').get(latest, source)?.n
+      : 0;
+    return {
+      cacheValid:   cacheIsValid(source),
+      scrapedAt:    latest,
+      ageMinutes:   age != null ? Math.round(age / 60_000) : null,
+      ttlHours:     ttl / 3600_000,
+      nextScrapeIn: age != null ? Math.round(Math.max(0, ttl - age) / 60_000) + ' min' : 'nå',
+      stationCount: count,
+    };
+  }
+
   res.json({
-    cacheValid:    valid,
-    scrapedAt:     latest,
-    ageMinutes:    age != null ? Math.round(age / 60_000) : null,
-    ttlHours:      ttl / 3600_000,
-    nextScrapeIn:  age != null ? Math.round(Math.max(0, ttl - age) / 60_000) + ' min' : 'nå',
-    stationCount:  count,
-    season:        season,
-    seasonText:    season ? 'Sesong (2x/dag)' : 'Vintersesong (1x/uke)',
-    scraping:      _scraping,
+    pumpepriser: { ...statusFor('pumpepriser', cacheTtlMs()), scraping: _scraping },
+    bunkring:    { ...statusFor('bunkring',    TTL_BUNKRING_MS), scraping: _scrapingBunkring },
+    season:      isBoatSeason(),
+    seasonText:  isBoatSeason() ? 'Sesong (pumpepriser 2x/dag)' : 'Vintersesong (pumpepriser 1x/uke)',
   });
 });
 
-// POST /api/fuel/refresh — tving oppdatering (admin)
+// POST /api/fuel/refresh — tving pumpepriser-oppdatering (admin)
 router.post('/refresh', async (req, res) => {
   if (_scraping) return res.json({ ok: false, message: 'Skraping pågår allerede' });
   const result = await scrapeAndCache();
+  res.json(result);
+});
+
+// POST /api/fuel/refresh-bunkring — tving bunkring-oppdatering (admin)
+router.post('/refresh-bunkring', async (req, res) => {
+  if (_scrapingBunkring) return res.json({ ok: false, message: 'Bunkring-skraping pågår allerede' });
+  const result = await scrapeBunkringAndCache();
   res.json(result);
 });
 

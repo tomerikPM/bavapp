@@ -12,9 +12,16 @@ const app    = express();
 const PORT   = process.env.PORT || 3001;
 const SK_URL = process.env.SIGNALK_URL || 'http://localhost:3000';
 
+// Railway/proxy: trust én proxy-hop for å få korrekt req.ip
+app.set('trust proxy', 1);
+
 app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Passord-gate for ikke-lokal tilgang (aktiveres kun hvis SITE_PASSWORD er satt).
+// Må mountes før routes + static slik at alt bak /uploads og /diagrams også er gated.
+app.use(require('./middleware/siteAuth'));
 
 const uploadsPath = process.env.UPLOADS_PATH || './uploads';
 if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
@@ -89,6 +96,14 @@ app.use('/api/changelog',   require('./routes/changelog'));
 app.use('/api/navigate',    require('./routes/navigate'));
 const fuelRoute = require('./routes/fuel');
 app.use('/api/fuel', fuelRoute);
+app.use('/api/fog',          require('./routes/fog'));
+app.use('/api/textforecast', require('./routes/textforecast'));
+app.use('/api/features',     require('./routes/features'));
+app.use('/api/router',       require('./routes/router'));
+app.use('/api/admin',        require('./routes/admin'));
+app.use('/api/photos',       require('./routes/photos'));
+app.use('/api/image',        require('./routes/image'));
+app.use('/api/vessel',       require('./routes/vessel'));
 
 const tracker = require('./tripTracker');
 const watcher = require('./eventWatcher');

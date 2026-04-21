@@ -1,9 +1,6 @@
 // pages/dashboard.js — live sensoroversikt
 import * as SK from '../signalk.js';
 import { maintenance } from '../api.js';
-import { fetchTides, fetchSunrise } from '../fun.js';
-
-let _sunTideLoaded = false;
 
 export async function render(container) {
 
@@ -25,10 +22,43 @@ export async function render(container) {
     <div class="sl">Vær nå</div>
     <div id="dash-wx-mini"><div class="wx-load"><div class="spin"></div>Henter vær…</div></div>
 
+    <div class="sl">Ruter</div>
+    <a href="#system" class="rt-widget" id="dash-router">
+      <div class="rt-widget-main">
+        <span class="rt-widget-icon" id="rt-w-icon">📡</span>
+        <div class="rt-widget-body">
+          <div class="rt-widget-title" id="rt-w-title">Henter status…</div>
+          <div class="rt-widget-sub"   id="rt-w-sub"></div>
+        </div>
+      </div>
+      <span class="rt-widget-chev">→</span>
+    </a>
+
     <div class="sl">Prioriterte oppgaver</div>
     <div id="dash-mx"><div class="wx-load"><div class="spin"></div></div></div>
 
   <style>
+    /* Ruter-widget */
+    .rt-widget {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:10px 14px; background:var(--white); border:1px solid var(--line);
+      border-left:3px solid var(--ink-light); margin-bottom:8px;
+      text-decoration:none; color:inherit; cursor:pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .rt-widget:hover { background:var(--surface); border-left-color:var(--blue); }
+    .rt-widget-main { display:flex; align-items:center; gap:10px; min-width:0; }
+    .rt-widget-icon { font-size:1.3rem; }
+    .rt-widget-body { min-width:0; }
+    .rt-widget-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:13px; letter-spacing:.04em; color:var(--ink); }
+    .rt-widget-sub { font-size:11px; color:var(--ink-light); margin-top:1px; }
+    .rt-widget-chev { color:var(--ink-light); font-size:16px; }
+    .rt-widget.rt-w-excellent { border-left-color:#4caf50; }
+    .rt-widget.rt-w-good      { border-left-color:#8bc34a; }
+    .rt-widget.rt-w-fair      { border-left-color:#ffc107; }
+    .rt-widget.rt-w-poor      { border-left-color:#ff9800; }
+    .rt-widget.rt-w-offline   { border-left-color:#9e9e9e; }
+
     .fun-card { background: var(--white); border: 1px solid var(--line); padding: 12px 14px; margin: 4px 0; }
     .fun-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .fun-card-title { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
@@ -42,14 +72,52 @@ export async function render(container) {
 
   loadMaintenanceList();
   loadWeatherMini();
-
-  if (!_sunTideLoaded) {
-    _sunTideLoaded = true;
-    loadHeaderSunTide();
-  }
+  loadRouterWidget();
 
   const state = SK.getState();
   if (Object.keys(state).length) onSkUpdate(state);
+}
+
+// ── Ruter-widget ──────────────────────────────────────────────────────────
+async function loadRouterWidget() {
+  const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
+  const widget = document.getElementById('dash-router');
+  const iconEl = document.getElementById('rt-w-icon');
+  const titleEl = document.getElementById('rt-w-title');
+  const subEl = document.getElementById('rt-w-sub');
+  if (!widget) return;
+
+  try {
+    const r = await fetch(`${BASE}/api/router/status`);
+    const d = await r.json();
+    if (!d.reachable) {
+      widget.classList.add('rt-w-offline');
+      iconEl.textContent = '🔌';
+      titleEl.textContent = 'Ruter ikke tilgjengelig';
+      subEl.textContent = d.config?.passSet ? 'Kan ikke nå RUT200' : 'ROUTER_PASS ikke satt';
+      return;
+    }
+    const m = d.mobile || {};
+    const w = d.wan || {};
+    const dbm = m.signal;
+    let cls = 'rt-w-offline';
+    if (dbm != null) {
+      if (dbm >= -70) cls = 'rt-w-excellent';
+      else if (dbm >= -85) cls = 'rt-w-good';
+      else if (dbm >= -100) cls = 'rt-w-fair';
+      else cls = 'rt-w-poor';
+    }
+    widget.classList.add(cls);
+    iconEl.textContent = '📡';
+    const signalStr = dbm != null ? `${dbm} dBm` : '—';
+    titleEl.textContent = `${m.networkType || 'Ukjent'} · ${signalStr}`;
+    subEl.textContent = `${m.operator || ''} · WAN ${w.proto || '—'}${w.up ? ' ✓' : ''}`;
+  } catch {
+    widget.classList.add('rt-w-offline');
+    iconEl.textContent = '🔌';
+    titleEl.textContent = 'Ruter ikke tilgjengelig';
+    subEl.textContent = 'Kan ikke kontakte backend';
+  }
 }
 
 // ── Haiku ─────────────────────────────────────────────────────────────────────
@@ -70,33 +138,6 @@ async function onHaikuClick() {
   } finally {
     _haikuLoading = false;
   }
-}
-
-// ── Sol og tidevann → header ──────────────────────────────────────────────────
-async function loadHeaderSunTide() {
-  const lat = parseFloat(localStorage.getItem('wx_lat') || '58.15');
-  const lon = parseFloat(localStorage.getItem('wx_lon') || '7.99');
-
-  fetchSunrise(lat, lon)
-    .then(({ sunrise, sunset }) => { setHdr('rise', sunrise); setHdr('set', sunset); })
-    .catch(() => {});
-
-  fetchTides(lat, lon)
-    .then(({ nextHigh, nextLow }) => {
-      const fmt = p => {
-        if (!p) return '—';
-        const tid = new Date(p.t).toLocaleTimeString('no', { hour:'2-digit', minute:'2-digit' });
-        return p.v != null ? `${tid} ${Math.round(p.v)}cm` : tid;
-      };
-      setHdr('hv', fmt(nextHigh));
-      setHdr('lv', fmt(nextLow));
-    })
-    .catch(e => console.warn('[tide]', e.message));
-}
-
-function setHdr(key, val) {
-  const el = document.getElementById('hm-' + key);
-  if (el) el.textContent = val;
 }
 
 // ── Live SK ───────────────────────────────────────────────────────────────────

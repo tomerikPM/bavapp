@@ -67,7 +67,7 @@ export async function render(container) {
     <div class="sl" style="margin-top:32px">Dieselpriser nærby</div>
     <div class="fuel-section">
       <div class="fuel-header" id="fuel-toggle">
-        <span>⛽ Billigste diesel i området</span>
+        <span>⛽ Dieselpriser i nærheten</span>
         <span id="fuel-pos" style="font-size:10px;color:var(--ink-light);margin-left:8px"></span>
         <span id="fuel-chevron" style="margin-left:auto;font-size:10px">&#9660;</span>
       </div>
@@ -314,6 +314,9 @@ export async function render(container) {
     .fuel-nav-btn:hover:not(:disabled) { background: #b06000; color: #fff; }
     .fuel-nav-btn:disabled { opacity: .5; cursor: default; }
     .fuel-scraped { font-size: 10px; color: var(--ink-light); padding: 6px 12px 8px; text-align: right; }
+
+    /* Kilde-domene som subtil tekst */
+    .fuel-source { font-size: 10px; color: var(--ink-light); opacity: .75; }
   </style>`;
 
   // Sett riktig høyde på fill basert på initialverdi
@@ -677,7 +680,7 @@ async function loadFuelPrices() {
 
   const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
   try {
-    const res  = await fetch(`${BASE}/api/fuel/prices?lat=${lat}&lon=${lon}&radius=150&limit=15`);
+    const res  = await fetch(`${BASE}/api/fuel/prices?lat=${lat}&lon=${lon}&radius=50&limit=30`);
     const data = await res.json();
     const stations = (data.data || []).filter(s => s.diesel);
 
@@ -687,21 +690,24 @@ async function loadFuelPrices() {
     }
 
     const TREND = { green:'<span class="fuel-trend down">↓</span>', red:'<span class="fuel-trend up">↑</span>' };
-    const ageMin = data.scrapedAt
-      ? Math.round((Date.now() - new Date(data.scrapedAt)) / 60000)
-      : null;
 
     body.innerHTML = stations.map(s => {
-      const trend = TREND[s.diesel_trend] || '';
-      const dist  = s.distanceKm < 9999 ? `${Math.round(s.distanceKm)} km` : '';
-      const area  = [s.municipality, s.area].filter(Boolean).join(' · ');
+      const trend        = TREND[s.diesel_trend] || '';
+      const dist         = s.distanceKm < 9999 ? `${Math.round(s.distanceKm)} km` : '';
+      const area         = [s.municipality, s.area].filter(Boolean).join(' · ');
+      const sourceDomain = s.source === 'bunkring' ? 'bunkring.no' : 'pumpepriser.no';
+      // Viser bare ekte bekreftelsesdato fra kilden. Ikke syntetiser fra vår
+      // egen price_updated_at — det ville vist "Bekreftet i dag" første gang
+      // vi scrapet en stasjon selv om prisen i kilden er gammel.
       const updated = formatPriceAge(s.lastDieselConfirmedAt, s.lastDieselConfirmedBy);
+
       return `
         <div class="fuel-row">
           <div class="fuel-name">
             <div class="fuel-station">${s.name}</div>
             <div class="fuel-meta">
               <span>${area}</span>
+              <span class="fuel-source">${sourceDomain}</span>
               ${updated.html}
             </div>
           </div>
@@ -733,8 +739,7 @@ async function loadFuelPrices() {
             ⬆ Nav
           </button>` : ''}
         </div>`;
-    }).join('') +
-    (ageMin != null ? `<div class="fuel-scraped">Hentet fra pumpepriser.no for ${ageMin} min siden</div>` : '');
+    }).join('') + sourcesFooter(data.sources);
 
     // Klikk på "Fyll inn" → navigerer til #kostnader med forhåndsutfylt skjema
     body.querySelectorAll('.fuel-fill-btn').forEach(btn => {
@@ -795,11 +800,34 @@ async function loadFuelPrices() {
   }
 }
 
+// Bygg footer som viser sist-skrapet-tid per kilde. Inputen er `data.sources`
+// fra /api/fuel/prices — { pumpepriser: {scrapedAt, ...}, bunkring: {scrapedAt, ...} }.
+function sourcesFooter(sources) {
+  if (!sources) return '';
+  const parts = [];
+  if (sources.pumpepriser?.scrapedAt) {
+    const min = Math.round((Date.now() - new Date(sources.pumpepriser.scrapedAt)) / 60000);
+    parts.push(`pumpepriser.no (${fmtAge(min)})`);
+  }
+  if (sources.bunkring?.scrapedAt) {
+    const min = Math.round((Date.now() - new Date(sources.bunkring.scrapedAt)) / 60000);
+    parts.push(`bunkring.no (${fmtAge(min)})`);
+  }
+  if (!parts.length) return '';
+  return `<div class="fuel-scraped">Oppdatert: ${parts.join(' · ')}</div>`;
+}
+
+function fmtAge(min) {
+  if (min < 60)   return `${min} min siden`;
+  if (min < 1440) return `${Math.round(min / 60)} t siden`;
+  return `${Math.round(min / 1440)} d siden`;
+}
+
 // Formater "sist bekreftet" per stasjon. Viser når en bruker på pumpepriser.no
 // sist verifiserte dieselprisen. Viktigste signalet for å avgjøre om prisen er pålitelig.
 function formatPriceAge(confirmedIso, confirmedBy) {
   if (!confirmedIso) {
-    return { html: `<span class="fuel-updated very-stale">· Aldri bekreftet</span>`, cls: 'very-stale' };
+    return { html: `<span class="fuel-updated">· Dato ukjent</span>`, cls: '' };
   }
 
   const ageMs = Date.now() - new Date(confirmedIso).getTime();

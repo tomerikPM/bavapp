@@ -119,6 +119,32 @@ function buildShell(compact = false) {
 
     .scan-register-bar { display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;flex-wrap:wrap;gap:8px;border-top:1px solid var(--line);margin-top:8px; }
     .scan-register-summary { font-size:12px;color:var(--ink-light); }
+
+    /* Faktura-som-kostnad */
+    .scan-invoice-cost {
+      margin: 12px 0 4px; padding: 10px 12px;
+      background: var(--ok-tint); border-left: 3px solid var(--ok);
+    }
+    .scan-invoice-cost-lbl {
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
+      font-size: 13px; color: var(--ink); flex-wrap: wrap;
+    }
+    .scan-invoice-cost-lbl input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--ok); flex-shrink: 0; }
+    .scan-invoice-cost-lbl strong { font-weight: 600; flex: 1; min-width: 0; }
+    .scan-invoice-cost-amount {
+      font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1.05rem;
+      color: var(--ok); white-space: nowrap;
+    }
+    .scan-invoice-cost-fields {
+      margin-top: 8px; padding-left: 24px; font-size: 12px;
+    }
+    .scan-invoice-cost-sub {
+      display: inline-flex; align-items: center; gap: 6px; color: var(--ink-light);
+    }
+    .scan-invoice-cost-sub select {
+      font-family: inherit; font-size: 12px; border: 1px solid var(--line);
+      background: var(--white); padding: 3px 6px; cursor: pointer;
+    }
   </style>`;
 }
 
@@ -166,13 +192,44 @@ function setupScanner(container, onClose) {
     const apiKey = localStorage.getItem('api_key');
     if (!apiKey) { toast('API-nøkkel mangler — legg inn i ⚙ Innstillinger', 'err'); return; }
     const btn = container.querySelector('#scan-analyze-btn');
-    btn.textContent = '⏳ Analyserer…';
     btn.disabled = true;
     try {
-      const result = await analyzeWithClaude(_fileData, _fileMime, apiKey);
+      // HEIC fra iPhone må konverteres til JPEG — Claude Vision godtar ikke HEIC.
+      // Send fila til backend → få JPEG-base64 tilbake → bruk denne.
+      let analyzeBase64 = _fileData;
+      let analyzeMime   = _fileMime;
+      const looksLikeHeic = /^image\/(heic|heif)$/.test(_fileMime)
+                         || /\.(heic|heif)$/i.test(_fileName);
+      if (looksLikeHeic) {
+        btn.textContent = '🔄 Konverterer HEIC…';
+        const base = localStorage.getItem('backend_url') || 'http://localhost:3001';
+        const fd = new FormData();
+        fd.append('file', _fileBlob, _fileName);
+        const r = await fetch(`${base}/api/image/convert`, { method: 'POST', body: fd });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error('HEIC-konvertering: ' + (e.error || `HTTP ${r.status}`));
+        }
+        const conv = await r.json();
+        analyzeBase64 = conv.base64;
+        analyzeMime   = conv.mime;
+      }
+
+      btn.textContent = '⏳ Analyserer…';
+      const result = await analyzeWithClaude(analyzeBase64, analyzeMime, apiKey);
       renderResult(container, result, _fileBlob, _fileName, onClose);
     } catch(e) {
+      // Vis feil tydelig — både toast OG inline melding så bruker ikke går glipp
       toast('AI-analyse feilet: ' + e.message, 'err');
+      const wrap = container.querySelector('#scan-result-wrap');
+      if (wrap) {
+        wrap.style.display = '';
+        wrap.innerHTML = `<div style="padding:14px;background:#fdecea;border:1px solid #f44336;border-left:4px solid #f44336;color:#b71c1c;font-size:13px;line-height:1.5">
+          <strong>⚠ Analyse feilet</strong><br>
+          ${e.message}<br>
+          <span style="font-size:11px;color:#666">Trykk «🤖 Analyser på nytt» for å forsøke igjen.</span>
+        </div>`;
+      }
     } finally {
       btn.textContent = '🤖 Analyser på nytt';
       btn.disabled = false;
@@ -276,6 +333,25 @@ function renderResult(container, r, fileBlob, fileName, onClose) {
       ${r.vendor  ? `<div class="scan-field"><div class="scan-field-l">Leverandør</div><div class="scan-field-v">${r.vendor}</div></div>` : ''}
       ${r.total_amount ? `<div class="scan-field"><div class="scan-field-l">Totalbeløp</div><div class="scan-field-v">${Math.round(r.total_amount).toLocaleString('no')} kr${r.total_ex_vat ? ` · eks. mva ${Math.round(r.total_ex_vat).toLocaleString('no')} kr` : ''}</div></div>` : ''}
 
+      ${r.total_amount ? `
+        <div class="scan-invoice-cost">
+          <label class="scan-invoice-cost-lbl">
+            <input type="checkbox" id="scan-invoice-cost" checked>
+            <strong>Opprett kostnadspost for hele fakturaen</strong>
+            <span class="scan-invoice-cost-amount">${Math.round(r.total_amount).toLocaleString('no')} kr</span>
+          </label>
+          <div class="scan-invoice-cost-fields">
+            <label class="scan-invoice-cost-sub">Kategori:
+              <select id="scan-invoice-category">
+                ${['equipment','maintenance','fuel','marina','insurance','other'].map(c =>
+                  `<option value="${c}" ${guessInvoiceCategory(r, items) === c ? 'selected' : ''}>${c}</option>`
+                ).join('')}
+              </select>
+            </label>
+          </div>
+        </div>
+      ` : ''}
+
       ${items.length ? `
         <div class="scan-items-title">
           Linjeposter
@@ -360,27 +436,74 @@ function renderResult(container, r, fileBlob, fileName, onClose) {
     btn.textContent = '⏳ Registrerer…'; btn.disabled = true;
 
     let ok = 0, fail = 0;
+    const errors = [];
+
+    // 1) Faktura som kostnadspost (hvis avkrysset)
+    const invoiceChk = wrap.querySelector('#scan-invoice-cost');
+    if (invoiceChk?.checked && r.total_amount) {
+      const cat    = wrap.querySelector('#scan-invoice-category')?.value || 'equipment';
+      const date   = r.date || new Date().toISOString().slice(0, 10);
+      const vendor = r.vendor || '';
+      const desc   = r.summary || (vendor ? `Faktura fra ${vendor}` : 'Skannet faktura');
+      try {
+        await costs.create({
+          category:    cat,
+          date,
+          description: desc,
+          amount:      r.total_amount,
+          location:    vendor || null,
+          notes:       `Skannet faktura${vendor ? ' · ' + vendor : ''}${r.date ? ' · ' + r.date : ''}`,
+        });
+        ok++;
+      } catch (e) {
+        console.error('[scanner] Faktura-kostnad feilet:', e);
+        errors.push(`Faktura-kostnad: ${e.message}`);
+        fail++;
+      }
+    }
+
+    // 2) Linjeposter (parts / maintenance / add_cost per linje)
     for (let i = 0; i < items.length; i++) {
       const chk  = wrap.querySelector(`#scan-chk-${i}`);
       if (!chk?.checked) continue;
       const dest = wrap.querySelector(`#scan-dest-${i}`)?.value;
       if (!dest || dest === 'skip') continue;
 
-      // Les redigerte verdier
       const editedName = wrap.querySelector(`#scan-name-${i}`)?.value?.trim() || items[i].description;
       const editedPn   = wrap.querySelector(`#scan-pn-${i}`)?.value?.trim()   || items[i].part_number;
-
       const itemWithEdits = { ...items[i], description: editedName, part_number: editedPn || null };
 
       try { await registerItem(itemWithEdits, dest, r); ok++; }
-      catch { fail++; }
+      catch (e) {
+        console.error('[scanner] Linjepost feilet:', items[i].description, e);
+        errors.push(`${editedName || 'post ' + (i+1)}: ${e.message}`);
+        fail++;
+      }
     }
 
     btn.disabled = false; btn.textContent = '✓ Registrer valgte';
     if (ok > 0)   toast(`${ok} poster registrert ✓`, 'ok');
-    if (fail > 0) toast(`${fail} poster feilet`, 'err');
+    if (fail > 0) {
+      toast(`${fail} poster feilet — se konsoll`, 'err');
+      console.warn('[scanner] Registrering-feil:', errors);
+    }
     if (ok > 0) { if (_onResult) _onResult(r); if (onClose) setTimeout(onClose, 600); }
   });
+}
+
+// Gjetter beste kategori for fakturaen basert på linjepostene.
+// Fuel hvis drivstoff-relatert, maintenance hvis tjenester, ellers equipment.
+function guessInvoiceCategory(r, items) {
+  if (!items?.length) return 'equipment';
+  const costCats = items.map(it => it.cost_category).filter(Boolean);
+  if (costCats.includes('fuel'))        return 'fuel';
+  if (costCats.includes('marina'))      return 'marina';
+  if (costCats.includes('insurance'))   return 'insurance';
+  if (costCats.includes('maintenance')) return 'maintenance';
+  // Ellers: hvis alle er fysiske deler → equipment
+  const allParts = items.every(it => it.suggested_dest === 'add_part');
+  if (allParts) return 'equipment';
+  return 'other';
 }
 
 // ── Hjelpere ──────────────────────────────────────────────────────────────────

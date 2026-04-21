@@ -3,11 +3,14 @@ backend/data/*.db
 backend/data/*.db-journal
 backend/data/*.db-wal
 backend/data/*.db-shm
+backend/uploads/
 .env
 .env.local
 *.log
 .DS_Store
 .vscode/
 .idea/
-dist/
 build/
+# diagram-app: kildekoden er i diagram-app/src, dist committes til frontend/diagrams/
+diagram-app/dist/
+diagram-app/node_modules/

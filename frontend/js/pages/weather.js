@@ -1,5 +1,6 @@
 // pages/weather.js — full værsiden med MET Norway
 import * as SK from '../signalk.js';
+import { fetchTides } from '../fun.js';
 
 const DEFAULT_LAT = 58.15, DEFAULT_LON = 7.99;
 
@@ -108,7 +109,31 @@ export async function render(container) {
       <div class="ph-t">Vær</div>
       <div class="ph-s">${place} · MET Norway</div>
     </div>
-    <div id="wx-full"><div class="wx-load"><div class="spin"></div>Henter fra MET Norway…</div></div>`;
+    <div class="wx-tabs" role="tablist">
+      <button class="wx-tab wx-tab-active" data-tab="wx"  role="tab">Vær</button>
+      <button class="wx-tab"                data-tab="fog" role="tab">Sikt &amp; tåke</button>
+    </div>
+    <div id="wx-full" class="wx-panel wx-panel-active">
+      <div class="wx-load"><div class="spin"></div>Henter fra MET Norway…</div>
+    </div>
+    <div id="wx-fog" class="wx-panel" hidden></div>`;
+
+  // Tab-bytting — lazy-load av tåke-panelet første gang
+  let fogLoaded = false;
+  container.querySelectorAll('.wx-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      container.querySelectorAll('.wx-tab').forEach(b => b.classList.toggle('wx-tab-active', b === btn));
+      document.getElementById('wx-full').hidden = tab !== 'wx';
+      document.getElementById('wx-full').classList.toggle('wx-panel-active', tab === 'wx');
+      document.getElementById('wx-fog').hidden  = tab !== 'fog';
+      document.getElementById('wx-fog').classList.toggle('wx-panel-active', tab === 'fog');
+      if (tab === 'fog' && !fogLoaded) {
+        fogLoaded = true;
+        renderFogTab(document.getElementById('wx-fog'), lat, lon);
+      }
+    });
+  });
 
   try {
     const [fc, ocean, sun] = await Promise.all([
@@ -117,10 +142,106 @@ export async function render(container) {
       fetchMET(metUrl(`/weatherapi/sunrise/3.0/sun?lat=${lat}&lon=${lon}&date=${today()}&offset=+02:00`)).catch(() => null),
     ]);
     renderFull(container, fc, ocean, sun, lat, lon, place);
+    loadTextForecast(lat, lon);
+    loadTide(lat, lon);
   } catch (e) {
     document.getElementById('wx-full').innerHTML =
       `<div class="wx-load">⚠ Kan ikke hente MET-data: ${e.message}</div>`;
   }
+}
+
+// Tekstvarsel (kystvarsel) — hentes asynkront etter at hovedsiden er tegnet
+async function loadTextForecast(lat, lon) {
+  const el = document.getElementById('wx-text-forecast');
+  if (!el) return;
+  try {
+    const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
+    const r = await fetch(`${BASE}/api/textforecast?lat=${lat}&lon=${lon}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    el.innerHTML = renderTextForecast(data);
+  } catch (e) {
+    el.innerHTML = `<div class="wx-textfc-err">⚠ Kystvarsel ikke tilgjengelig: ${e.message}</div>`;
+  }
+}
+
+function renderTextForecast(data) {
+  if (!data?.match && !data?.areas?.length) {
+    return '<div class="wx-textfc-err">Ingen varsler tilgjengelig.</div>';
+  }
+
+  const match = data.match;
+  const matchHtml = match ? `
+    <div class="wx-textfc-match">
+      <div class="wx-textfc-area">📍 ${match.area}</div>
+      <div class="wx-textfc-title">${fmtInterval(match.interval)}</div>
+      <div class="wx-textfc-text">${match.text}</div>
+    </div>` : `<div class="wx-textfc-err">Båten er utenfor kystvarsel-områdene — se nabo-områder under.</div>`;
+
+  // Øvrige områder, skjulbare
+  const others = (data.areas || [])
+    .filter(a => !match || a.area !== match.area)
+    .slice(0, 12);
+  const othersHtml = others.length ? `
+    <details class="wx-textfc-more">
+      <summary>Øvrige områder (${others.length})</summary>
+      <div class="wx-textfc-others">
+        ${others.map(a => `
+          <div class="wx-textfc-other">
+            <div class="wx-textfc-other-area">${a.area}</div>
+            <div class="wx-textfc-other-text">${a.text}</div>
+          </div>`).join('')}
+      </div>
+    </details>` : '';
+
+  return matchHtml + othersHtml;
+}
+
+function fmtInterval(interval) {
+  if (!Array.isArray(interval) || interval.length < 2) return '';
+  const a = new Date(interval[0]), b = new Date(interval[1]);
+  const opts = { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' };
+  return `${a.toLocaleString('no', opts)} – ${b.toLocaleString('no', opts)}`;
+}
+
+// Tidevann (Kartverket) — nærmeste høy-/lavvann + stasjonsnavn
+async function loadTide(lat, lon) {
+  const el = document.getElementById('wx-tide');
+  if (!el) return;
+  try {
+    const { nextHigh, nextLow, stationName } = await fetchTides(lat, lon);
+    el.innerHTML = renderTide(nextHigh, nextLow, stationName);
+  } catch (e) {
+    el.innerHTML = `<div class="wx-tide-err">⚠ Tidevann ikke tilgjengelig: ${e.message}</div>`;
+  }
+}
+
+function renderTide(high, low, station) {
+  const fmtTide = (p, label, icon, cls) => {
+    if (!p) return `
+      <div class="wx-tide-cell">
+        <div class="wx-tide-lbl">${icon} ${label}</div>
+        <div class="wx-tide-val">—</div>
+      </div>`;
+    const d   = new Date(p.t);
+    const h   = Math.round((d.getTime() - Date.now()) / 3600_000);
+    const rel = h <= 0 ? 'nå' : h < 24 ? `om ${h} t` : `om ${Math.round(h/24)} d`;
+    const tid = d.toLocaleString('no', { weekday:'short', hour:'2-digit', minute:'2-digit' });
+    return `
+      <div class="wx-tide-cell ${cls}">
+        <div class="wx-tide-lbl">${icon} ${label}</div>
+        <div class="wx-tide-val">${tid}</div>
+        <div class="wx-tide-sub">${p.v != null ? Math.round(p.v) + ' cm · ' + rel : rel}</div>
+      </div>`;
+  };
+
+  return `
+    <div class="wx-tide-grid">
+      ${fmtTide(high, 'Høyvann', '▲', 'hi')}
+      ${fmtTide(low,  'Lavvann', '▼', 'lo')}
+    </div>
+    <div class="wx-tide-src">Stasjon: ${station || 'ukjent'}</div>
+  `;
 }
 
 function renderFull(container, fc, ocean, sun, lat, lon, place) {
@@ -244,6 +365,16 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
       </div>
     </div>
 
+    <div class="sl">Kystvarsel · MET Norway</div>
+    <div id="wx-text-forecast" class="wx-textfc">
+      <div class="wx-textfc-loading">Henter kystvarsel…</div>
+    </div>
+
+    <div class="sl">Tidevann · Kartverket</div>
+    <div id="wx-tide" class="wx-tide">
+      <div class="wx-tide-loading">Henter tidevann…</div>
+    </div>
+
     <div class="sl">Vind og nedbør</div>
     <div class="sgrid">
       ${sc('Vind nå',   Math.round(wind_ms) + ' m/s', windDir(wind_dir) + ' · Bf ' + bft, bft>=7?'cr':bft>=5?'wn':'ok')}
@@ -283,6 +414,47 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
     </div>
 
   <style>
+    .wx-tabs { display:flex; gap:0; margin-bottom:16px; border-bottom:1px solid var(--line); }
+    .wx-tab {
+      flex:1; padding:10px 12px; background:transparent; border:none; cursor:pointer;
+      font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px;
+      letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light);
+      border-bottom:2px solid transparent; transition: color .15s, border-color .15s;
+    }
+    .wx-tab:hover { color:var(--ink); }
+    .wx-tab-active { color:var(--blue); border-bottom-color:var(--blue); }
+    .wx-panel[hidden] { display:none; }
+
+    /* Tekstvarsel (kystvarsel) */
+    .wx-textfc { margin-bottom: 20px; border:1px solid var(--line); background: var(--white); }
+    .wx-textfc-loading, .wx-textfc-err { padding: 14px; font-size: 12px; color: var(--ink-light); }
+    .wx-textfc-match { padding: 12px 14px; }
+    .wx-textfc-area  { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:14px; letter-spacing:.05em; color:var(--blue); margin-bottom:2px; }
+    .wx-textfc-title { font-size:10px; color:var(--ink-light); text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+    .wx-textfc-text  { font-size:13px; line-height:1.5; color:var(--ink); }
+    .wx-textfc-more  { border-top:1px solid var(--line); }
+    .wx-textfc-more summary {
+      cursor:pointer; padding:10px 14px; font-family:'Barlow Condensed',sans-serif;
+      font-weight:700; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--ink-light); user-select:none;
+    }
+    .wx-textfc-more summary:hover { color:var(--ink); }
+    .wx-textfc-others { padding: 0 14px 12px; display:flex; flex-direction:column; gap:10px; }
+    .wx-textfc-other { border-top:1px dashed var(--line); padding-top:10px; }
+    .wx-textfc-other-area { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px; color:var(--ink); margin-bottom:2px; }
+    .wx-textfc-other-text { font-size:12px; line-height:1.45; color:var(--ink-light); }
+
+    /* Tidevann */
+    .wx-tide { margin-bottom: 20px; border:1px solid var(--line); background: var(--white); }
+    .wx-tide-loading, .wx-tide-err { padding: 14px; font-size: 12px; color: var(--ink-light); }
+    .wx-tide-grid { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); }
+    .wx-tide-cell { background:var(--white); padding: 12px 14px; }
+    .wx-tide-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); margin-bottom:4px; }
+    .wx-tide-val { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:1.05rem; color:var(--ink); }
+    .wx-tide-sub { font-size:11px; color:var(--ink-light); margin-top:2px; }
+    .wx-tide-cell.hi .wx-tide-lbl { color:#1976d2; }
+    .wx-tide-cell.lo .wx-tide-lbl { color:#ef6c00; }
+    .wx-tide-src { padding:8px 14px; font-size:10px; color:var(--ink-light); border-top:1px solid var(--line); text-align:right; }
     .wx-sun-row { display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:rgba(255,255,255,.5); padding-bottom:16px; }
     .wx-sun-row span { white-space:nowrap; }
     .wx-hstrip { display:flex; overflow-x:auto; gap:0; scrollbar-width:none; margin-bottom:4px; border:1px solid var(--line); }
@@ -306,6 +478,247 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
     .wx-dw { font-size:10px; color:var(--ink-light); }
     .wx-dp { font-size:10px; color:var(--blue); margin-top:2px; font-weight:600; }
   </style>`;
+}
+
+// ── Tåke-tab: henter /api/fog/forecast og rendrer nå-kort + 48h-bar + Windy-kart
+const FOG_LABELS = ['Lav/ingen', 'Moderat', 'Høy', 'Svært høy'];
+const FOG_COLORS = ['#4caf50', '#ffc107', '#ff9800', '#f44336'];
+const FOG_ALCLS  = ['ok', 'wn', 'cr', 'cr'];
+
+async function renderFogTab(container, lat, lon) {
+  container.innerHTML = `<div class="wx-load"><div class="spin"></div>Henter tåke-prognose…</div>`;
+  try {
+    const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
+    const r = await fetch(`${BASE}/api/fog/forecast?lat=${lat}&lon=${lon}&hours=48`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    container.innerHTML = buildFogHtml(data, lat, lon);
+
+    // Toggle overordnet forklaring
+    const info = container.querySelector('.fog-now-info');
+    const exp  = container.querySelector('#fog-explainer');
+    if (info && exp) {
+      info.addEventListener('click', () => {
+        exp.hidden = !exp.hidden;
+        info.classList.toggle('fog-now-info-open', !exp.hidden);
+      });
+    }
+
+    // Klikk på en metrikk-boks → vis forklaring i delt hjelpeboks
+    const grid    = container.querySelector('#fog-now-grid');
+    const helpBox = container.querySelector('#fog-kv-help-box');
+    if (grid && helpBox) {
+      const titleEl = helpBox.querySelector('.fog-kv-help-title');
+      const textEl  = helpBox.querySelector('.fog-kv-help-text');
+      let selected  = null;
+
+      grid.addEventListener('click', (e) => {
+        const cell = e.target.closest('.fog-kv-clickable');
+        if (!cell) return;
+        if (cell === selected) {
+          helpBox.hidden = true;
+          cell.classList.remove('fog-kv-selected');
+          selected = null;
+          return;
+        }
+        if (selected) selected.classList.remove('fog-kv-selected');
+        selected = cell;
+        cell.classList.add('fog-kv-selected');
+        titleEl.textContent = cell.dataset.label || '';
+        textEl.textContent  = cell.dataset.help  || '';
+        helpBox.hidden = false;
+      });
+
+      // Tastatur-støtte for fokus + Enter/Space
+      grid.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const cell = e.target.closest('.fog-kv-clickable');
+        if (!cell) return;
+        e.preventDefault();
+        cell.click();
+      });
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="wx-load">⚠ Kan ikke hente tåke-data: ${e.message}</div>`;
+  }
+}
+
+function buildFogHtml(data, lat, lon) {
+  const now  = data.now;
+  const peak = data.peak;
+  const timeline = data.timeline || [];
+
+  const nowCard = now ? `
+    <div class="fog-now">
+      <div class="fog-now-banner" style="background:${FOG_COLORS[now.level]}">
+        <span class="fog-now-title">Tåke-risiko nå</span>
+        <span class="fog-now-level">${FOG_LABELS[now.level]}</span>
+        <button class="fog-now-info" type="button" aria-label="Forklaring" title="Vis forklaring">ⓘ</button>
+      </div>
+      <div class="fog-now-body">
+        <div class="fog-now-reasons">${now.reasons?.length ? now.reasons.map(r => '• ' + r).join('<br>') : 'Ingen tåke-indikasjoner akkurat nå.'}</div>
+        <div class="fog-now-grid" id="fog-now-grid">
+          ${kv('Luft',      fmtNum(now.airTemp,  1, '°C'), '',                                       'Lufttemperatur — bestemmer hvor mye fukt luften kan holde. Kald luft mettes raskere.')}
+          ${kv('Duggpunkt', fmtNum(now.dewPoint, 1, '°C'), '',                                       'Temperaturen der luften er mettet og vann kondenserer. Jo nærmere lufttemperaturen, jo større tåkefare.')}
+          ${kv('Sjø',       fmtNum(now.sst,      1, '°C'), '',                                       'Sjøtemperatur. Hvis duggpunktet er HØYERE enn sjøen kan havtåke dannes når varm fuktig luft kjøles av havet.')}
+          ${kv('Vind',      now.wind != null ? Math.round(now.wind) + ' m/s' : '—', now.bft != null ? 'Bf ' + now.bft : '', 'Lav vind (< 5 m/s) favoriserer tåkedannelse. Kraftig vind blåser tåka bort eller hindrer at den setter seg.')}
+          ${kv('Fukt',      fmtNum(now.humidity, 0, '%'),  '',                                       'Relativ luftfuktighet. Over 95 % er tåke sannsynlig, over 97 % nesten garantert ved vindstille.')}
+          ${kv('MET tåke',  fmtNum(now.fogAreaFraction, 0, '%'), '',                                 'MET Norway sin egen prognose for tåkedekning. Andel av himmelen dekket av tåke.')}
+        </div>
+        <div class="fog-kv-help-box" id="fog-kv-help-box" hidden>
+          <div class="fog-kv-help-title"></div>
+          <div class="fog-kv-help-text"></div>
+        </div>
+      </div>
+      <div class="fog-explainer" id="fog-explainer" hidden>
+        <h4>Slik fungerer tåke-oversikten</h4>
+        <p>Havtåke oppstår når varm, fuktig luft beveger seg over kaldere sjøvann. Luften kjøles ned til duggpunktet og vanndampen kondenserer til tåkedråper. Dette er den vanligste formen for tåke på sommeren langs norskekysten.</p>
+        <p><strong>Appen regner tåke-risiko som det høyeste av to signaler:</strong></p>
+        <ol>
+          <li><strong>MET Norway sin prognose</strong> for tåkedekning (<em>fog area fraction</em>) — vises som "MET tåke"-verdien.</li>
+          <li><strong>Vår egen havtåke-modell</strong> som kombinerer duggpunkt, sjøtemperatur, vind og fuktighet.</li>
+        </ol>
+        <p><strong>Nøkkelformel:</strong> Hvis <em>duggpunkt &gt; sjøtemperatur</em> og vinden er svak (&lt; 10 m/s), er det fare for havtåke. Jo høyere luftfuktighet og jo mindre duggpunkt-spread, jo mer sikker er risikoen.</p>
+        <p class="fog-explainer-note">Trykk på ⓘ igjen for å lukke.</p>
+      </div>
+    </div>` : '';
+
+  const peakRow = peak
+    ? `<div class="fog-peak">Høyeste risiko neste 48 t: <strong>${FOG_LABELS[peak.level]}</strong> ${fmtRel(peak.time)}</div>`
+    : `<div class="fog-peak">Ingen tåke-risiko registrert de neste 48 timene.</div>`;
+
+  const bars = timeline.map(r => {
+    const hr = new Date(r.time).getHours();
+    const lbl = hr % 6 === 0 ? `<span>${String(hr).padStart(2,'0')}</span>` : '';
+    const tip = `${fmtTime(r.time)} · ${FOG_LABELS[r.level]}` + (r.reasons?.length ? `&#10;${r.reasons.join('&#10;')}` : '');
+    return `<div class="fog-bar" style="background:${FOG_COLORS[r.level]}" title="${tip}">${lbl}</div>`;
+  }).join('');
+
+  // Windy.com embed — visibility-lag, zoom 9 ≈ 50 km synlig
+  const windy = `https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&detailLat=${lat}&detailLon=${lon}&zoom=9&level=surface&overlay=visibility&product=ecmwf&menu=&message=&marker=true&type=map&location=coordinates&metricWind=m%2Fs&metricTemp=default`;
+
+  return `
+    <div class="sl">Nå</div>
+    ${nowCard}
+    ${peakRow}
+
+    <div class="sl" style="margin-top:24px">Tåke-risiko neste 48 timer</div>
+    <div class="fog-timeline">${bars}</div>
+    <div class="fog-legend">
+      <span style="--c:${FOG_COLORS[0]}">Lav</span>
+      <span style="--c:${FOG_COLORS[1]}">Moderat</span>
+      <span style="--c:${FOG_COLORS[2]}">Høy</span>
+      <span style="--c:${FOG_COLORS[3]}">Svært høy</span>
+    </div>
+
+    <div class="sl" style="margin-top:28px">Sikt — interaktivt kart</div>
+    <div class="fog-map">
+      <iframe src="${windy}" width="100%" height="420" frameborder="0" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    </div>
+    <div class="wx-source">Kart: Windy.com (visibility · ECMWF) · Prognose: MET Norway (locationforecast + oceanforecast)</div>
+
+    <style>
+      .fog-now { margin-bottom: 12px; border:1px solid var(--line); background:var(--white); }
+      .fog-now-banner {
+        display:flex; align-items:center; gap:12px; padding:10px 14px; color:#fff;
+      }
+      .fog-now-title {
+        font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:11px;
+        letter-spacing:.14em; text-transform:uppercase; opacity:.85;
+      }
+      .fog-now-level {
+        font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:18px;
+        letter-spacing:.03em; flex:1;
+      }
+      .fog-now-info {
+        background:rgba(255,255,255,.25); border:none; color:#fff; cursor:pointer;
+        width:26px; height:26px; font-size:14px; font-weight:700; line-height:1;
+        display:flex; align-items:center; justify-content:center; transition:background .15s;
+      }
+      .fog-now-info:hover       { background:rgba(255,255,255,.4); }
+      .fog-now-info-open        { background:rgba(0,0,0,.25); }
+      .fog-now-body { padding:14px; }
+      .fog-now-reasons { font-size:13px; color:var(--ink); line-height:1.55; margin-bottom:14px; }
+      .fog-now-grid {
+        display:grid; grid-template-columns:repeat(3,1fr); gap:10px 6px;
+        padding-top:12px; border-top:1px solid var(--line);
+      }
+      @media (min-width:500px) { .fog-now-grid { grid-template-columns:repeat(6,1fr); } }
+      .fog-kv {
+        display:flex; flex-direction:column; align-items:center; gap:3px;
+        padding:8px 4px; border-radius:4px; transition: background .15s;
+      }
+      .fog-kv-clickable { cursor:pointer; user-select:none; }
+      .fog-kv-clickable:hover { background:#eef2f7; }
+      .fog-kv-clickable:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+      .fog-kv-selected { background:#e3edf8; }
+      .fog-kv strong { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.05rem; color:var(--ink); }
+      .fog-kv-lbl { font-size:10px; color:var(--ink-light); text-align:center; letter-spacing:.02em; }
+      .fog-kv-help {
+        display:inline-block; width:13px; height:13px; line-height:12px; text-align:center;
+        margin-left:4px; border:1px solid var(--ink-light); border-radius:50%;
+        font-size:9px; color:var(--ink-light); font-weight:700; vertical-align:middle;
+      }
+      .fog-kv-clickable:hover .fog-kv-help,
+      .fog-kv-selected       .fog-kv-help { border-color:var(--blue); color:var(--blue); }
+
+      .fog-kv-help-box {
+        margin-top:10px; padding:10px 12px; background:#eef2f7;
+        border-left:3px solid var(--blue); font-size:12.5px; color:var(--ink); line-height:1.5;
+      }
+      .fog-kv-help-title {
+        font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:12px;
+        letter-spacing:.1em; text-transform:uppercase; color:var(--blue); margin-bottom:4px;
+      }
+      .fog-explainer {
+        padding:14px; border-top:1px solid var(--line); background:#f8f9fb;
+        font-size:12.5px; color:var(--ink); line-height:1.55;
+      }
+      .fog-explainer h4 {
+        font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:13px;
+        letter-spacing:.08em; text-transform:uppercase; color:var(--blue);
+        margin:0 0 10px; padding:0;
+      }
+      .fog-explainer p  { margin:0 0 10px; }
+      .fog-explainer ol { margin:0 0 10px 20px; padding:0; }
+      .fog-explainer ol li { margin-bottom:4px; }
+      .fog-explainer-note { font-size:11px; color:var(--ink-light); font-style:italic; margin-top:14px !important; }
+      .fog-peak { font-size:12px; color:var(--ink-light); padding:10px 0 4px; }
+      .fog-timeline { display:flex; height:44px; border:1px solid var(--line); margin-bottom:22px; }
+      .fog-bar { flex:1; min-width:4px; position:relative; border-right:1px solid rgba(255,255,255,.25); cursor:help; }
+      .fog-bar:last-child { border-right:none; }
+      .fog-bar > span { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:9px; color:var(--ink-light); font-family:'Barlow Condensed',sans-serif; font-weight:700; letter-spacing:.05em; }
+      .fog-legend { display:flex; gap:16px; padding:4px 0 8px; justify-content:center; flex-wrap:wrap; font-size:11px; color:var(--ink-light); }
+      .fog-legend span::before { content:''; display:inline-block; width:10px; height:10px; background:var(--c); margin-right:5px; vertical-align:middle; }
+      .fog-map iframe { display:block; border:1px solid var(--line); }
+    </style>
+  `;
+}
+
+function kv(label, value, sub, help) {
+  const dataHelp  = help  ? ` data-help="${help.replace(/"/g, '&quot;')}"` : '';
+  const dataLabel = ` data-label="${label}"`;
+  const hint      = help  ? '<span class="fog-kv-help">?</span>' : '';
+  const clickable = help  ? ' fog-kv-clickable' : '';
+  const role      = help  ? ' role="button" tabindex="0"'        : '';
+  return `
+    <div class="fog-kv${clickable}"${dataHelp}${dataLabel}${role}>
+      <strong>${value}</strong>
+      <span class="fog-kv-lbl">${label}${sub ? ' · ' + sub : ''}${hint}</span>
+    </div>`;
+}
+
+function fmtNum(v, digits, unit) {
+  if (v == null) return '—';
+  const n = digits ? Number(v).toFixed(digits) : Math.round(v);
+  return `${n}${unit || ''}`;
+}
+
+function fmtRel(iso) {
+  const h = Math.round((new Date(iso).getTime() - Date.now()) / 3600_000);
+  if (h <= 0)  return '(nå)';
+  if (h < 24)  return `om ${h} t`;
+  return `om ${Math.round(h / 24)} d`;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

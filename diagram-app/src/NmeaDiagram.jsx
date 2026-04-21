@@ -8,8 +8,9 @@ import {
   MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useEffect } from 'react';
 import BavNode from './BavNode.jsx';
-import { nmeaNodes, nmeaEdges } from './nmeaData.js';
+import { useDiagramData } from './useDiagramData.js';
 
 const nodeTypes = { bavNode: BavNode };
 
@@ -19,8 +20,15 @@ const defaultEdgeOptions = {
 };
 
 export default function NmeaDiagram() {
-  const [nodes, , onNodesChange] = useNodesState(nmeaNodes);
-  const [edges, , onEdgesChange] = useEdgesState(nmeaEdges);
+  const { nodes: apiNodes, edges: apiEdges, loading, error } = useDiagramData('nmea');
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  useEffect(() => { setNodes(apiNodes); }, [apiNodes, setNodes]);
+  useEffect(() => { setEdges(apiEdges); }, [apiEdges, setEdges]);
+
+  if (loading && !nodes.length) return <div style={loadStyle}>Henter NMEA-diagram…</div>;
+  if (error   && !nodes.length) return <div style={loadStyle}>⚠ {error}</div>;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -60,3 +68,10 @@ export default function NmeaDiagram() {
     </div>
   );
 }
+
+const loadStyle = {
+  display:'flex', alignItems:'center', justifyContent:'center',
+  height:'100%', color:'#8a8a8a',
+  fontFamily:'Barlow Condensed, sans-serif', fontSize:13,
+  letterSpacing:'.1em', textTransform:'uppercase',
+};

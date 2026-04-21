@@ -1,0 +1,943 @@
+// pages/system.js — Bavapp-programvare: arkitektur, endringslogg, features
+const BASE = () => localStorage.getItem('backend_url') || 'http://localhost:3001';
+
+const PRIO = [
+  { label: 'Framtid',  color: '#4caf50', groupTitle: 'Framtid / eksperimentelt' },
+  { label: 'Nice',     color: '#ffc107', groupTitle: 'Nice to have' },
+  { label: 'Bør',      color: '#ff9800', groupTitle: 'Bør (høy daglig verdi)' },
+  { label: 'Må',       color: '#f44336', groupTitle: 'Må (sikkerhet/kritisk)' },
+];
+
+export async function render(container) {
+  container.innerHTML = `
+    <div class="ph">
+      <div class="ph-t">System</div>
+      <div class="ph-s">Bavapp-programvare · arkitektur · endringslogg · features</div>
+    </div>
+    <div class="sys-tabs" role="tablist">
+      <button class="sys-tab sys-tab-active" data-tab="arch"      role="tab">Arkitektur</button>
+      <button class="sys-tab"                data-tab="changelog" role="tab">Endringslogg</button>
+      <button class="sys-tab"                data-tab="features"  role="tab">Features</button>
+      <button class="sys-tab"                data-tab="router"    role="tab">Ruter</button>
+    </div>
+    <div id="sys-panel-arch"      class="sys-panel sys-panel-active"></div>
+    <div id="sys-panel-changelog" class="sys-panel" hidden></div>
+    <div id="sys-panel-features"  class="sys-panel" hidden></div>
+    <div id="sys-panel-router"    class="sys-panel" hidden></div>
+
+    ${styles()}
+  `;
+
+  renderArch(document.getElementById('sys-panel-arch'));
+
+  const loaded = { changelog: false, features: false, router: false };
+  container.querySelectorAll('.sys-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      container.querySelectorAll('.sys-tab').forEach(b => b.classList.toggle('sys-tab-active', b === btn));
+      for (const t of ['arch', 'changelog', 'features', 'router']) {
+        const el = document.getElementById('sys-panel-' + t);
+        el.hidden = t !== tab;
+        el.classList.toggle('sys-panel-active', t === tab);
+      }
+      if (tab === 'changelog' && !loaded.changelog) {
+        loaded.changelog = true;
+        renderChangelogTab(document.getElementById('sys-panel-changelog'));
+      }
+      if (tab === 'features' && !loaded.features) {
+        loaded.features = true;
+        renderFeaturesTab(document.getElementById('sys-panel-features'));
+      }
+      if (tab === 'router' && !loaded.router) {
+        loaded.router = true;
+        renderRouterTab(document.getElementById('sys-panel-router'));
+      }
+      if (tab === 'router') startRouterPolling();
+      else                  stopRouterPolling();
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ARKITEKTUR-TAB
+// ══════════════════════════════════════════════════════════════════════
+function renderArch(panel) {
+  panel.innerHTML = `
+    <div class="arch-intro">
+      BavApp er en <strong>Progressive Web App (PWA)</strong> som fungerer som en digital tvilling
+      av Bavaria Sport 32. Appen henter sensordata i sanntid fra båtens elektriske og mekaniske
+      systemer, lagrer tidsseriedata lokalt, og presenterer alt i et responsivt brukergrensesnitt
+      optimalisert for iPad i cockpit. Arkitekturen er bygget rundt
+      <strong>tre distinkte lag</strong> — datainnsamling, persistering og presentasjon —
+      med en tydelig separasjon mellom live-data og historisk analyse.
+    </div>
+
+    <div class="arch-flow">
+      <div class="arch-flow-title">Datapipeline — fra sensor til skjerm</div>
+      <div class="arch-pipeline">
+        <div class="arch-pipe-step plan"><div class="arch-pipe-icon">⚙️</div><div class="arch-pipe-label">Sensorer</div><div class="arch-pipe-sub">NMEA 2000<br>VE.Direct · W-Bus</div></div>
+        <div class="arch-pipe-arrow">→</div>
+        <div class="arch-pipe-step plan"><div class="arch-pipe-icon">🖥</div><div class="arch-pipe-label">Cerbo GX</div><div class="arch-pipe-sub">Venus OS<br>Signal K server</div></div>
+        <div class="arch-pipe-arrow">→</div>
+        <div class="arch-pipe-step"><div class="arch-pipe-icon">📡</div><div class="arch-pipe-label">Signal K API</div><div class="arch-pipe-sub">REST + WebSocket<br>lokalt nettverk</div></div>
+        <div class="arch-pipe-arrow">→</div>
+        <div class="arch-pipe-step"><div class="arch-pipe-icon">🗄</div><div class="arch-pipe-label">Backend</div><div class="arch-pipe-sub">Node.js + Express<br>SQLite database</div></div>
+        <div class="arch-pipe-arrow">→</div>
+        <div class="arch-pipe-step"><div class="arch-pipe-icon">📱</div><div class="arch-pipe-label">Frontend</div><div class="arch-pipe-sub">PWA · Vanilla JS<br>iPad / iPhone</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--ink-light);font-style:italic">Stiplede bokser er planlagte komponenter.</div>
+    </div>
+
+    <div class="arch-stack">
+      ${archCard('📡','Signal K','Åpen maritim datastandard · JSON over HTTP/WS',
+        `<p>Signal K normaliserer data fra NMEA 0183, NMEA 2000 og proprietære protokoller til et felles JSON-skjema. Alle sensorverdier adresseres via dot-notation paths, f.eks. <code class="ac">electrical.batteries.0.capacity.stateOfCharge</code>.</p>`,
+        [['ok','Implementert'],['plan','Cerbo GX planlagt']])}
+      ${archCard('🗄','Backend — Node.js + SQLite','Express REST API · lokal persistering',
+        `<p>Persistenslag med tre oppgaver: tidsserielagring, domeneobjekter (hendelseslogg, vedlikehold, turer), og turdeteksjon — en tilstandsmaskin som poller Signal K og beregner distanse med Haversine.</p>`,
+        [['ok','Implementert'],['','SQLite'],['','Express 4']])}
+      ${archCard('📱','Frontend — PWA','Vanilla JS · ES modules · ingen bundler',
+        `<p>SPA i ren JavaScript med ES modules. Hash-basert routing, hvert side-modul eksporterer <code class="ac">render()</code> og <code class="ac">onSkUpdate()</code> for live-data.</p>`,
+        [['ok','Implementert'],['','Service Worker'],['','ES Modules']])}
+      ${archCard('🖥','Victron Cerbo GX','Edge-datamaskin · Venus OS Large · planlagt',
+        `<p>ARM-basert datamaskin fra Victron. Cerbo GX aggregerer data fra SmartShunt (VE.Direct) og NMEA 2000-backbone, og eksponerer alt som et Signal K endepunkt på båtnettverket.</p>`,
+        [['plan','Planlagt'],['plan','VE.Direct'],['plan','NMEA 2000']])}
+      ${archCard('◈','Koblingsskjemaer — React Flow','Interaktive diagrammer · Vite + React + @xyflow/react',
+        `<p>Koblingsskjemaene er bygget som en separat Vite + React-app og embeddes som iframe på <a href="#vessel">Båten</a>-siden. Nodene er trekkbare og zoombare.</p>`,
+        [['ok','Implementert'],['','React Flow v12'],['','Vite 5']])}
+      ${archCard('🤖','Claude AI-integrasjon','Anthropic API · direkte fra browser',
+        `<p>Dokumentarkiv scanner bilder og PDFer med Claude Vision. Sensordata genererer norsk haiku via Anthropic API. API-nøkkel i localStorage. Modell: claude-sonnet-4-20250514.</p>`,
+        [['ok','Implementert'],['','Claude Sonnet 4'],['','Vision API']])}
+    </div>
+
+    <div class="arch-note">
+      <strong>Teknologier:</strong>
+      Frontend — Vanilla JS ES Modules, Chart.js 4, Leaflet, React Flow (koblingsskjemaer), Service Worker PWA.
+      Backend — Node.js v20, Express 4, better-sqlite3, multer 2, uuid.
+      Protokoller — Signal K (JSON/WebSocket), NMEA 2000, VE.Direct, MET Norway Locationforecast 2.0.
+      Planlagt — Venus OS Large (Cerbo GX), InfluxDB, Node-RED, Tailscale VPN.
+      Bygd og vedlikeholdt av Tom Erik Thorsen med Claude (Anthropic) som parprogrammerer.
+    </div>
+  `;
+}
+
+function archCard(icon, title, sub, body, tags) {
+  return `<div class="arch-card">
+    <div class="arch-card-head">
+      <span class="arch-card-icon">${icon}</span>
+      <div><div class="arch-card-title">${title}</div><div class="arch-card-sub">${sub}</div></div>
+    </div>
+    <div class="arch-card-body">
+      ${body}
+      <div>${tags.map(([cls, lbl]) => `<span class="arch-tag${cls ? ' ' + cls : ''}">${lbl}</span>`).join('')}</div>
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ENDRINGSLOGG-TAB
+// ══════════════════════════════════════════════════════════════════════
+let _showAuto    = false;
+let _filterType  = 'all';
+
+async function renderChangelogTab(panel) {
+  panel.innerHTML = `
+    <div class="cl-controls">
+      <button class="btn-primary" id="cl-add-btn" style="font-size:11px;padding:8px 14px">+ Legg til endring</button>
+      <label class="cl-toggle">
+        <input type="checkbox" id="cl-show-auto"> Vis automatiske oppføringer
+      </label>
+      <select id="cl-filter-type" class="cl-select">
+        <option value="all">Alle typer</option>
+        <option value="feat">feat — funksjonalitet</option>
+        <option value="fix">fix — bugfix</option>
+        <option value="hardware">hardware — maskinvare</option>
+        <option value="plan">plan — planlegging</option>
+      </select>
+    </div>
+
+    <div id="cl-form" hidden>
+      <div class="cl-form-grid">
+        <input id="clf-title" placeholder="Tittel *" class="cl-form-input">
+        <select id="clf-type" class="cl-form-input">
+          <option value="feat">feat — funksjonalitet</option>
+          <option value="fix">fix — bugfix</option>
+          <option value="hardware">hardware — maskinvare</option>
+        </select>
+        <input id="clf-version" placeholder="Versjon (valgfri, f.eks. v0.11)" class="cl-form-input">
+      </div>
+      <textarea id="clf-desc" placeholder="Beskrivelse (valgfri)" rows="2" class="cl-form-input cl-form-textarea"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" id="clf-save" style="font-size:11px;padding:8px 14px">Lagre</button>
+        <button class="btn-secondary" id="clf-cancel" style="font-size:11px;padding:7px 12px">Avbryt</button>
+      </div>
+    </div>
+
+    <div id="cl-list"><div class="wx-load"><div class="spin"></div>Laster endringslogg…</div></div>
+  `;
+
+  document.getElementById('cl-show-auto').addEventListener('change', e => {
+    _showAuto = e.target.checked;
+    loadChangelog();
+  });
+  document.getElementById('cl-filter-type').addEventListener('change', e => {
+    _filterType = e.target.value;
+    loadChangelog();
+  });
+  document.getElementById('cl-add-btn').addEventListener('click', () => {
+    document.getElementById('cl-form').hidden = false;
+    document.getElementById('clf-title').focus();
+  });
+  document.getElementById('clf-cancel').addEventListener('click', () => {
+    document.getElementById('cl-form').hidden = true;
+    clearForm();
+  });
+  document.getElementById('clf-save').addEventListener('click', addChangelogEntry);
+
+  loadChangelog();
+}
+
+async function loadChangelog() {
+  const list = document.getElementById('cl-list');
+  if (!list) return;
+  try {
+    const { data } = await fetch(`${BASE()}/api/changelog`).then(r => r.json());
+    const filtered = (data || []).filter(e => {
+      if (!_showAuto   && e.auto) return false;
+      if (_filterType !== 'all' && e.type !== _filterType) return false;
+      return true;
+    });
+    if (!filtered.length) {
+      list.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--ink-light);font-size:12px">Ingen oppføringer med gjeldende filter.</div>';
+      return;
+    }
+
+    // Grupper per versjon
+    const byVersion = new Map();
+    for (const e of filtered) {
+      const v = e.version || 'uten versjon';
+      if (!byVersion.has(v)) byVersion.set(v, []);
+      byVersion.get(v).push(e);
+    }
+    const sortedVersions = [...byVersion.keys()].sort(compareVersionsDesc);
+
+    list.innerHTML = sortedVersions.map(v => `
+      <div class="cl-group">
+        <div class="cl-version-header">${v}</div>
+        <div class="cl-entries">
+          ${byVersion.get(v).map(renderEntry).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.cl-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Slette denne oppføringen?')) return;
+        await fetch(`${BASE()}/api/changelog/${btn.dataset.id}`, { method: 'DELETE' });
+        loadChangelog();
+      });
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="empty" style="padding:20px;color:var(--danger);font-size:12px">Feil: ${e.message}</div>`;
+  }
+}
+
+function compareVersionsDesc(a, b) {
+  const parse = v => {
+    const m = /^v?(\d+)\.(\d+)/.exec(v);
+    return m ? [+m[1], +m[2]] : [-1, -1];
+  };
+  const [ma, na] = parse(a);
+  const [mb, nb] = parse(b);
+  if (ma !== mb) return mb - ma;
+  return nb - na;
+}
+
+const TYPE_ICON = { feat: '✨', fix: '🔧', hardware: '⚡', plan: '📋' };
+const TYPE_LBL  = { feat: 'feat', fix: 'fix', hardware: 'hardware', plan: 'plan' };
+
+function renderEntry(e) {
+  const dt    = e.date ? new Date(e.date).toLocaleDateString('no', { day:'2-digit', month:'short' }) : '';
+  const icon  = TYPE_ICON[e.type] || '•';
+  const badge = e.auto ? '<span class="cl-auto-badge">auto</span>' : '';
+  return `
+    <div class="cl-entry">
+      <div class="cl-entry-icon">${icon}</div>
+      <div class="cl-entry-body">
+        <div class="cl-entry-top">
+          <span class="cl-entry-type">${TYPE_LBL[e.type] || e.type}</span>
+          <span class="cl-entry-title">${escapeHtml(e.title)}</span>
+          ${badge}
+        </div>
+        ${e.description ? `<div class="cl-entry-desc">${escapeHtml(e.description)}</div>` : ''}
+        <div class="cl-entry-meta">${dt} · kilde: ${e.source || 'manual'}</div>
+      </div>
+      <button class="cl-del" data-id="${e.id}" title="Slett">×</button>
+    </div>
+  `;
+}
+
+async function addChangelogEntry() {
+  const title = document.getElementById('clf-title').value.trim();
+  if (!title) { alert('Tittel er påkrevd'); return; }
+  const type    = document.getElementById('clf-type').value;
+  const version = document.getElementById('clf-version').value.trim();
+  const desc    = document.getElementById('clf-desc').value.trim();
+
+  await fetch(`${BASE()}/api/changelog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title, type, description: desc || null,
+      version: version || null, source: 'manual', auto: 0,
+      date: new Date().toISOString().slice(0, 10),
+    }),
+  });
+  clearForm();
+  document.getElementById('cl-form').hidden = true;
+  loadChangelog();
+}
+
+function clearForm() {
+  ['clf-title', 'clf-version', 'clf-desc'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURES-TAB
+// ══════════════════════════════════════════════════════════════════════
+let _featuresShowDone = false;
+
+async function renderFeaturesTab(panel) {
+  panel.innerHTML = `
+    <div class="feat-controls">
+      <button class="btn-primary" id="feat-add-btn" style="font-size:11px;padding:8px 14px">+ Ny feature</button>
+      <label class="cl-toggle">
+        <input type="checkbox" id="feat-show-done"> Vis implementerte (read-only)
+      </label>
+    </div>
+
+    <div id="feat-form" hidden>
+      <div class="cl-form-grid">
+        <input id="featf-title" placeholder="Tittel *" class="cl-form-input">
+        <select id="featf-prio" class="cl-form-input">
+          <option value="3">Må (rød)</option>
+          <option value="2" selected>Bør (oransje)</option>
+          <option value="1">Nice (gul)</option>
+          <option value="0">Framtid (grønn)</option>
+        </select>
+      </div>
+      <textarea id="featf-desc" placeholder="Beskrivelse (valgfri)" rows="3" class="cl-form-input cl-form-textarea"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" id="featf-save" style="font-size:11px;padding:8px 14px">Lagre</button>
+        <button class="btn-secondary" id="featf-cancel" style="font-size:11px;padding:7px 12px">Avbryt</button>
+      </div>
+    </div>
+
+    <div id="feat-list"><div class="wx-load"><div class="spin"></div>Laster features…</div></div>
+  `;
+
+  document.getElementById('feat-show-done').addEventListener('change', e => {
+    _featuresShowDone = e.target.checked;
+    loadFeatures();
+  });
+  document.getElementById('feat-add-btn').addEventListener('click', () => {
+    document.getElementById('feat-form').hidden = false;
+    document.getElementById('featf-title').focus();
+  });
+  document.getElementById('featf-cancel').addEventListener('click', () => {
+    document.getElementById('feat-form').hidden = true;
+    clearFeatureForm();
+  });
+  document.getElementById('featf-save').addEventListener('click', saveNewFeature);
+
+  loadFeatures();
+}
+
+async function loadFeatures() {
+  const list = document.getElementById('feat-list');
+  if (!list) return;
+  try {
+    const { data } = await fetch(`${BASE()}/api/features`).then(r => r.json());
+    const planned   = (data || []).filter(f => f.status === 'planned' || f.status === 'in_progress');
+    const done      = (data || []).filter(f => f.status === 'done');
+
+    // Grupper planlagte per prioritet (3 først)
+    const byPrio = new Map();
+    for (let p = 3; p >= 0; p--) byPrio.set(p, []);
+    for (const f of planned) {
+      if (byPrio.has(f.priority)) byPrio.get(f.priority).push(f);
+    }
+
+    let html = '';
+    for (let p = 3; p >= 0; p--) {
+      const items = byPrio.get(p) || [];
+      if (!items.length) continue;
+      html += `
+        <div class="feat-group">
+          <div class="feat-group-head" style="border-left-color:${PRIO[p].color}">
+            <span class="feat-group-badge" style="background:${PRIO[p].color}">${PRIO[p].label}</span>
+            <span class="feat-group-title">${PRIO[p].groupTitle}</span>
+            <span class="feat-group-count">${items.length}</span>
+          </div>
+          <div class="feat-items">
+            ${items.map(renderFeatureItem).join('')}
+          </div>
+        </div>`;
+    }
+
+    if (!planned.length) {
+      html += `<div class="empty" style="padding:20px;text-align:center;color:var(--ink-light);font-size:12px">Ingen planlagte features. Trykk <strong>+ Ny feature</strong> for å legge til.</div>`;
+    }
+
+    if (_featuresShowDone && done.length) {
+      html += `
+        <div class="feat-group feat-group-done">
+          <div class="feat-group-head" style="border-left-color:var(--ink-light)">
+            <span class="feat-group-badge" style="background:var(--ink-light)">Implementert</span>
+            <span class="feat-group-title">Ferdig utviklet (read-only)</span>
+            <span class="feat-group-count">${done.length}</span>
+          </div>
+          <div class="feat-items">
+            ${done.map(renderFeatureDone).join('')}
+          </div>
+        </div>`;
+    }
+
+    list.innerHTML = html;
+    wireFeatureHandlers();
+  } catch (e) {
+    list.innerHTML = `<div class="empty" style="padding:20px;color:var(--danger);font-size:12px">Feil: ${e.message}</div>`;
+  }
+}
+
+function renderFeatureItem(f) {
+  const color = PRIO[f.priority]?.color || '#999';
+  return `
+    <div class="feat-item" data-id="${f.id}" style="border-left-color:${color}">
+      <div class="feat-item-body">
+        <div class="feat-item-title" data-field="title">${escapeHtml(f.title)}</div>
+        ${f.description ? `<div class="feat-item-desc" data-field="description">${escapeHtml(f.description)}</div>` : '<div class="feat-item-desc feat-item-desc-empty" data-field="description">(ingen beskrivelse)</div>'}
+      </div>
+      <div class="feat-item-actions">
+        <select class="feat-prio-select" data-id="${f.id}" title="Endre prioritet">
+          <option value="3"${f.priority===3?' selected':''}>Må</option>
+          <option value="2"${f.priority===2?' selected':''}>Bør</option>
+          <option value="1"${f.priority===1?' selected':''}>Nice</option>
+          <option value="0"${f.priority===0?' selected':''}>Framtid</option>
+        </select>
+        <button class="feat-btn feat-complete" data-id="${f.id}" title="Marker som implementert">✓</button>
+        <button class="feat-btn feat-edit"     data-id="${f.id}" title="Rediger">✏</button>
+        <button class="feat-btn feat-delete"   data-id="${f.id}" title="Slett">🗑</button>
+      </div>
+    </div>`;
+}
+
+function renderFeatureDone(f) {
+  const v  = f.completed_version || '';
+  const dt = f.completed_at ? new Date(f.completed_at).toLocaleDateString('no', { day:'2-digit', month:'short', year:'2-digit' }) : '';
+  return `
+    <div class="feat-item feat-item-done">
+      <div class="feat-item-body">
+        <div class="feat-item-title">✓ ${escapeHtml(f.title)}</div>
+        ${f.description ? `<div class="feat-item-desc">${escapeHtml(f.description)}</div>` : ''}
+        <div class="feat-item-meta">${[v, dt].filter(Boolean).join(' · ')}</div>
+      </div>
+    </div>`;
+}
+
+function wireFeatureHandlers() {
+  document.querySelectorAll('.feat-prio-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      await fetch(`${BASE()}/api/features/${sel.dataset.id}/priority`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: +sel.value }),
+      });
+      loadFeatures();
+    });
+  });
+
+  document.querySelectorAll('.feat-complete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Marker som implementert? Dette oppretter en changelog-entry og bumper versjonen.')) return;
+      const r = await fetch(`${BASE()}/api/features/${btn.dataset.id}/complete`, { method: 'POST' });
+      if (!r.ok) { alert('Kunne ikke fullføre'); return; }
+      const { version } = await r.json();
+      alert(`Implementert. Ny versjon: ${version}`);
+      loadFeatures();
+    });
+  });
+
+  document.querySelectorAll('.feat-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Slette denne featuren?')) return;
+      await fetch(`${BASE()}/api/features/${btn.dataset.id}`, { method: 'DELETE' });
+      loadFeatures();
+    });
+  });
+
+  document.querySelectorAll('.feat-edit').forEach(btn => {
+    btn.addEventListener('click', () => toggleEditInline(btn.dataset.id));
+  });
+}
+
+function toggleEditInline(id) {
+  const item = document.querySelector(`.feat-item[data-id="${id}"]`);
+  if (!item) return;
+  const titleEl = item.querySelector('[data-field="title"]');
+  const descEl  = item.querySelector('[data-field="description"]');
+  const curTitle = titleEl.textContent;
+  const curDesc  = descEl.classList.contains('feat-item-desc-empty') ? '' : descEl.textContent;
+
+  titleEl.innerHTML = `<input type="text" class="feat-edit-input" value="${escapeAttr(curTitle)}">`;
+  descEl.innerHTML  = `<textarea class="feat-edit-input feat-edit-textarea" rows="2">${escapeHtml(curDesc)}</textarea>`;
+  descEl.classList.remove('feat-item-desc-empty');
+
+  const actions = item.querySelector('.feat-item-actions');
+  actions.innerHTML = `
+    <button class="feat-btn feat-save-edit" data-id="${id}">Lagre</button>
+    <button class="feat-btn feat-cancel-edit" data-id="${id}">Avbryt</button>
+  `;
+
+  actions.querySelector('.feat-save-edit').addEventListener('click', async () => {
+    const title = titleEl.querySelector('input').value.trim();
+    const desc  = descEl.querySelector('textarea').value.trim();
+    if (!title) { alert('Tittel er påkrevd'); return; }
+    await fetch(`${BASE()}/api/features/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description: desc }),
+    });
+    loadFeatures();
+  });
+  actions.querySelector('.feat-cancel-edit').addEventListener('click', loadFeatures);
+}
+
+async function saveNewFeature() {
+  const title = document.getElementById('featf-title').value.trim();
+  if (!title) { alert('Tittel er påkrevd'); return; }
+  const priority = +document.getElementById('featf-prio').value;
+  const desc     = document.getElementById('featf-desc').value.trim();
+
+  await fetch(`${BASE()}/api/features`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, description: desc, priority }),
+  });
+  clearFeatureForm();
+  document.getElementById('feat-form').hidden = true;
+  loadFeatures();
+}
+
+function clearFeatureForm() {
+  ['featf-title', 'featf-desc'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('featf-prio').value = '2';
+}
+
+// ── Utils ───────────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+// ══════════════════════════════════════════════════════════════════════
+// RUTER-TAB (Teltonika RUT200)
+// ══════════════════════════════════════════════════════════════════════
+let _routerPollTimer = null;
+let _routerReachable = null;  // null = ikke testet, true/false = siste status
+
+async function renderRouterTab(panel) {
+  panel.innerHTML = `
+    <div class="rt-controls">
+      <button class="btn-secondary" id="rt-refresh"   style="font-size:11px;padding:7px 14px">↻ Oppdater</button>
+      <button class="btn-secondary" id="rt-reboot"    style="font-size:11px;padding:7px 14px">⟲ Reboot ruter</button>
+      <button class="btn-secondary" id="rt-sms-toggle" style="font-size:11px;padding:7px 14px">📨 Send SMS</button>
+      <label class="cl-toggle"><input type="checkbox" id="rt-autorefresh" checked> Auto-oppdater (30 s)</label>
+    </div>
+
+    <div id="rt-sms-form" class="rt-form" hidden>
+      <div class="cl-form-grid">
+        <input  id="rt-sms-number"  placeholder="Mottakernummer (+47…)" class="cl-form-input">
+        <input  id="rt-sms-message" placeholder="Meldingstekst"          class="cl-form-input">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary"   id="rt-sms-send"   style="font-size:11px;padding:8px 14px">Send</button>
+        <button class="btn-secondary" id="rt-sms-cancel" style="font-size:11px;padding:7px 12px">Avbryt</button>
+      </div>
+    </div>
+
+    <div id="rt-body"><div class="wx-load"><div class="spin"></div>Henter ruterstatus…</div></div>
+  `;
+
+  document.getElementById('rt-refresh').addEventListener('click', () => loadRouterStatus());
+  document.getElementById('rt-reboot').addEventListener('click', doRouterReboot);
+  document.getElementById('rt-sms-toggle').addEventListener('click', () => {
+    const f = document.getElementById('rt-sms-form');
+    f.hidden = !f.hidden;
+    if (!f.hidden) document.getElementById('rt-sms-number').focus();
+  });
+  document.getElementById('rt-sms-cancel').addEventListener('click', () => {
+    document.getElementById('rt-sms-form').hidden = true;
+  });
+  document.getElementById('rt-sms-send').addEventListener('click', doRouterSms);
+  document.getElementById('rt-autorefresh').addEventListener('change', (e) => {
+    if (e.target.checked) startRouterPolling();
+    else                  stopRouterPolling();
+  });
+
+  await loadRouterStatus();
+  startRouterPolling();
+}
+
+async function loadRouterStatus() {
+  const body = document.getElementById('rt-body');
+  if (!body) return;
+  try {
+    const [status, cfg] = await Promise.all([
+      fetch(`${BASE()}/api/router/status`).then(r => r.json()),
+      fetch(`${BASE()}/api/router/config`).then(r => r.json()),
+    ]);
+    _routerReachable = !!status.reachable;
+    body.innerHTML = renderRouterBody(status, cfg);
+
+    if (_routerReachable) loadWifiClients();
+  } catch (e) {
+    body.innerHTML = `<div class="empty" style="padding:20px;color:var(--danger);font-size:12px">Feil: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderRouterBody(status, cfg) {
+  if (!status.reachable) {
+    return `
+      <div class="rt-offline">
+        <div class="rt-offline-icon">🔌</div>
+        <div class="rt-offline-title">Ruteren er ikke tilgjengelig</div>
+        <div class="rt-offline-reason">${escapeHtml(status.error || 'Ukjent årsak')}</div>
+        <div class="rt-offline-steps">
+          <strong>For å aktivere:</strong>
+          <ol>
+            <li>Koble RUT200 til strøm (9-30 V DC) og nettverk</li>
+            <li>Sett <code>ROUTER_PASS=&lt;passord&gt;</code> i <code>backend/.env</code></li>
+            <li>Sett evt. <code>ROUTER_IP</code> (standard: <code>192.168.1.1</code>) og <code>ROUTER_TLS=1</code> hvis HTTPS</li>
+            <li>Restart backend</li>
+          </ol>
+        </div>
+        <div class="rt-offline-cfg">
+          <span>IP: <code>${escapeHtml(cfg.ip || '?')}</code></span>
+          <span>Bruker: <code>${escapeHtml(cfg.user || '?')}</code></span>
+          <span>Passord: <code>${cfg.passSet ? '✓ satt' : '⚠ ikke satt'}</code></span>
+          <span>TLS: <code>${cfg.tls ? 'ja' : 'nei'}</code></span>
+        </div>
+      </div>
+    `;
+  }
+
+  const m = status.mobile || {};
+  const w = status.wan    || {};
+  const signalCls = signalClass(m.signal);
+
+  return `
+    <div class="rt-hero rt-hero-${signalCls}">
+      <div class="rt-hero-row">
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">Signal</div>
+          <div class="rt-hero-val">${fmtSignal(m.signal)}</div>
+          <div class="rt-hero-sub">${signalBars(m.signal)}</div>
+        </div>
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">Nettverk</div>
+          <div class="rt-hero-val">${escapeHtml(m.networkType || '—')}</div>
+          <div class="rt-hero-sub">${escapeHtml(m.operator || 'Ukjent operatør')}</div>
+        </div>
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">WAN</div>
+          <div class="rt-hero-val">${escapeHtml(w.proto || '—')}${w.up ? ' ✓' : ''}</div>
+          <div class="rt-hero-sub">${escapeHtml(w.ipv4 || 'Ingen IP')}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rt-grid">
+      ${rtStat('RSSI',        fmtDbm(m.signal))}
+      ${rtStat('SINR',        fmtOrDash(m.sinr,  ' dB'))}
+      ${rtStat('RSRP',        fmtOrDash(m.rsrp,  ' dBm'))}
+      ${rtStat('RSRQ',        fmtOrDash(m.rsrq,  ' dB'))}
+      ${rtStat('Band',        m.band || '—')}
+      ${rtStat('Cell ID',     m.cellId || '—')}
+      ${rtStat('WAN uptime',  fmtUptime(w.uptime))}
+      ${rtStat('Sys. uptime', fmtUptime(status.uptime))}
+      ${rtStat('WiFi-klienter', status.wifiClients ?? '—')}
+    </div>
+
+    <div id="rt-clients-wrap" style="margin-top:16px"></div>
+
+    <div class="rt-meta">Sist oppdatert ${new Date(status.ts).toLocaleTimeString('no')} · Konfig: ${escapeHtml(cfg.ip)}${cfg.tls ? ' (TLS)' : ''}</div>
+  `;
+}
+
+function rtStat(lbl, val) {
+  return `<div class="rt-stat">
+    <div class="rt-stat-lbl">${lbl}</div>
+    <div class="rt-stat-val">${escapeHtml(String(val))}</div>
+  </div>`;
+}
+
+function signalClass(dbm) {
+  if (dbm == null) return 'offline';
+  if (dbm >= -70) return 'excellent';
+  if (dbm >= -85) return 'good';
+  if (dbm >= -100) return 'fair';
+  return 'poor';
+}
+function fmtSignal(dbm) {
+  return dbm == null ? '—' : `${dbm} dBm`;
+}
+function fmtDbm(dbm)      { return dbm == null ? '—' : `${dbm} dBm`; }
+function fmtOrDash(v, u)  { return v == null ? '—' : `${v}${u || ''}`; }
+function signalBars(dbm) {
+  if (dbm == null) return '○○○○○';
+  const bars = dbm >= -70 ? 5 : dbm >= -85 ? 4 : dbm >= -95 ? 3 : dbm >= -105 ? 2 : 1;
+  return '●'.repeat(bars) + '○'.repeat(5 - bars);
+}
+function fmtUptime(s) {
+  if (s == null) return '—';
+  const days = Math.floor(s / 86400);
+  const hrs  = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  if (days > 0) return `${days}d ${hrs}t`;
+  if (hrs > 0)  return `${hrs}t ${mins}m`;
+  return `${mins} min`;
+}
+
+async function loadWifiClients() {
+  const wrap = document.getElementById('rt-clients-wrap');
+  if (!wrap) return;
+  try {
+    const r = await fetch(`${BASE()}/api/router/wifi-clients`);
+    if (!r.ok) return;
+    const { clients } = await r.json();
+    if (!clients?.length) {
+      wrap.innerHTML = '<div class="rt-clients-empty">Ingen WiFi-klienter tilkoblet.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="cl-version-header">WiFi-klienter (${clients.length})</div>
+      <div class="rt-clients">
+        ${clients.map(c => `
+          <div class="rt-client">
+            <span class="rt-client-mac">${escapeHtml(c.mac || c.bssid || '?')}</span>
+            <span class="rt-client-signal">${c.signal ? c.signal + ' dBm' : '—'}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch {
+    /* stille feil — ikke blokker hovedvisning */
+  }
+}
+
+async function doRouterReboot() {
+  if (!confirm('Reboot ruteren? Den vil være utilgjengelig i ~2 minutter.')) return;
+  try {
+    const r = await fetch(`${BASE()}/api/router/reboot`, { method: 'POST' });
+    const d = await r.json();
+    alert(d.message || d.error || 'Reboot sendt');
+  } catch (e) {
+    alert('Feil: ' + e.message);
+  }
+}
+
+async function doRouterSms() {
+  const number  = document.getElementById('rt-sms-number').value.trim();
+  const message = document.getElementById('rt-sms-message').value.trim();
+  if (!number || !message) { alert('Nummer + melding påkrevd'); return; }
+  try {
+    const r = await fetch(`${BASE()}/api/router/sms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number, message }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert('SMS sendt.');
+      document.getElementById('rt-sms-number').value  = '';
+      document.getElementById('rt-sms-message').value = '';
+      document.getElementById('rt-sms-form').hidden   = true;
+    } else {
+      alert('Feil: ' + (d.error || 'ukjent'));
+    }
+  } catch (e) {
+    alert('Feil: ' + e.message);
+  }
+}
+
+function startRouterPolling() {
+  stopRouterPolling();
+  // Ikke poll hvis ruteren er kjent utilgjengelig (unngår støy + API-spam)
+  if (_routerReachable === false) return;
+  const checkbox = document.getElementById('rt-autorefresh');
+  if (checkbox && !checkbox.checked) return;
+  _routerPollTimer = setInterval(() => loadRouterStatus(), 30_000);
+}
+
+function stopRouterPolling() {
+  if (_routerPollTimer) { clearInterval(_routerPollTimer); _routerPollTimer = null; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// STYLES
+// ══════════════════════════════════════════════════════════════════════
+function styles() {
+  return `<style>
+    /* ── Tabs ── */
+    .sys-tabs { display:flex; gap:0; margin-bottom:16px; border-bottom:1px solid var(--line); }
+    .sys-tab {
+      flex:1; padding:10px 12px; background:transparent; border:none; cursor:pointer;
+      font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px;
+      letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light);
+      border-bottom:2px solid transparent; transition: color .15s, border-color .15s;
+    }
+    .sys-tab:hover { color:var(--ink); }
+    .sys-tab-active { color:var(--blue); border-bottom-color:var(--blue); }
+    .sys-panel[hidden] { display:none; }
+
+    /* ── Arkitektur ── */
+    .arch-intro { font-size:13px; line-height:1.8; color:var(--ink-medium); margin-bottom:24px; max-width:720px; }
+    .arch-flow { margin-bottom:28px; }
+    .arch-flow-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-light); margin-bottom:12px; }
+    .arch-pipeline { display:flex; align-items:stretch; flex-wrap:wrap; gap:0; border:1px solid var(--line); overflow:hidden; }
+    .arch-pipe-step { flex:1; min-width:100px; padding:14px 12px; background:var(--white); text-align:center; border-right:1px solid var(--line); }
+    .arch-pipe-step:last-child { border-right:none; }
+    .arch-pipe-step.plan { background:var(--surface); }
+    .arch-pipe-icon { font-size:1.4rem; line-height:1; margin-bottom:6px; }
+    .arch-pipe-label { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink); margin-bottom:3px; }
+    .arch-pipe-sub { font-size:10px; color:var(--ink-light); line-height:1.5; }
+    .arch-pipe-arrow { display:flex; align-items:center; padding:0 4px; font-size:1.2rem; color:var(--line); font-weight:300; }
+    .arch-stack { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:24px; }
+    @media (min-width:600px) { .arch-stack { grid-template-columns:1fr 1fr; } }
+    .arch-card { border:1px solid var(--line); border-top:3px solid var(--blue); background:var(--white); padding:16px; }
+    .arch-card-head { display:flex; gap:10px; align-items:flex-start; margin-bottom:10px; }
+    .arch-card-icon { font-size:1.4rem; line-height:1; flex-shrink:0; margin-top:2px; }
+    .arch-card-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink); margin-bottom:2px; }
+    .arch-card-sub { font-size:11px; color:var(--ink-light); }
+    .arch-card-body { font-size:12px; line-height:1.7; color:var(--ink-medium); }
+    .arch-card-body p { margin-bottom:8px; }
+    .arch-card-body .ac { font-family:'DM Mono',monospace; font-size:11px; background:var(--surface); padding:1px 4px; }
+    .arch-tag { display:inline-block; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; padding:2px 8px; border:1px solid var(--line); color:var(--ink-light); margin-right:4px; margin-top:6px; }
+    .arch-tag.ok   { border-color:var(--ok);   color:var(--ok);   background:var(--ok-tint); }
+    .arch-tag.plan { border-color:var(--warn); color:var(--warn); background:var(--warn-tint); }
+    .arch-note { font-size:11px; color:var(--ink-light); padding:12px 14px; background:var(--surface); border:1px solid var(--line); line-height:1.8; margin-bottom:24px; }
+
+    /* ── Endringslogg ── */
+    .cl-controls { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+    .cl-toggle   { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-light); }
+    .cl-select   { border:1px solid var(--line); padding:6px 8px; font-size:11px; background:var(--white); }
+    #cl-form     { background:var(--surface); border:1px solid var(--line); padding:14px; margin-bottom:14px; }
+    .cl-form-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px; margin-bottom:8px; }
+    @media (max-width:600px) { .cl-form-grid { grid-template-columns:1fr; } }
+    .cl-form-input { font-family:inherit; font-size:12px; border:1px solid var(--line); padding:8px; background:var(--white); outline:none; }
+    .cl-form-textarea { width:100%; resize:vertical; }
+    .cl-group { margin-bottom:20px; }
+    .cl-version-header { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:13px; letter-spacing:.08em; color:var(--blue); padding:8px 0 6px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+    .cl-entry { display:flex; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line); align-items:flex-start; }
+    .cl-entry:last-child { border-bottom:none; }
+    .cl-entry-icon { font-size:16px; flex-shrink:0; line-height:1.4; }
+    .cl-entry-body { flex:1; min-width:0; }
+    .cl-entry-top  { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; margin-bottom:3px; }
+    .cl-entry-type { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); padding:1px 6px; border:1px solid var(--line); }
+    .cl-entry-title{ font-size:13px; font-weight:600; color:var(--ink); }
+    .cl-auto-badge { font-size:9px; background:var(--blue-tint); color:var(--blue); padding:1px 6px; letter-spacing:.08em; font-weight:700; text-transform:uppercase; }
+    .cl-entry-desc { font-size:12px; color:var(--ink-medium); line-height:1.5; margin:3px 0; }
+    .cl-entry-meta { font-size:10px; color:var(--ink-light); }
+    .cl-del { background:none; border:none; cursor:pointer; color:var(--ink-light); font-size:18px; line-height:1; padding:0 6px; flex-shrink:0; }
+    .cl-del:hover { color:var(--danger); }
+
+    /* ── Features ── */
+    .feat-controls { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+    #feat-form { background:var(--surface); border:1px solid var(--line); padding:14px; margin-bottom:14px; }
+    .feat-group { margin-bottom:24px; }
+    .feat-group-head {
+      display:flex; align-items:center; gap:10px; padding:8px 12px;
+      border-left:4px solid; border-bottom:1px solid var(--line);
+      background:var(--surface); margin-bottom:0;
+    }
+    .feat-group-badge {
+      font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:10px;
+      padding:2px 8px; color:#fff; letter-spacing:.1em; text-transform:uppercase;
+    }
+    .feat-group-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink); flex:1; }
+    .feat-group-count { font-size:11px; color:var(--ink-light); }
+    .feat-items { display:flex; flex-direction:column; }
+    .feat-item {
+      display:flex; gap:10px; padding:12px 14px;
+      background:var(--white); border:1px solid var(--line); border-top:none;
+      border-left-width:4px;
+    }
+    .feat-item-done { background:#f8f9fb; border-left-color:var(--ink-light) !important; opacity:.8; }
+    .feat-item-body { flex:1; min-width:0; }
+    .feat-item-title { font-size:13px; font-weight:600; color:var(--ink); margin-bottom:3px; line-height:1.3; }
+    .feat-item-desc  { font-size:12px; color:var(--ink-medium); line-height:1.5; }
+    .feat-item-desc-empty { color:var(--ink-light); font-style:italic; }
+    .feat-item-meta  { font-size:10px; color:var(--ink-light); margin-top:4px; }
+    .feat-item-actions { display:flex; gap:4px; align-items:flex-start; flex-shrink:0; }
+    .feat-prio-select { border:1px solid var(--line); background:var(--white); font-size:11px; padding:3px 6px; cursor:pointer; }
+    .feat-btn { background:none; border:1px solid var(--line); cursor:pointer; width:28px; height:28px; font-size:13px; padding:0; color:var(--ink-light); display:flex; align-items:center; justify-content:center; }
+    .feat-btn:hover { background:var(--surface); color:var(--ink); }
+    .feat-complete:hover { border-color:var(--ok); color:var(--ok); }
+    .feat-delete:hover   { border-color:var(--danger); color:var(--danger); }
+    .feat-edit-input {
+      width:100%; border:1px solid var(--blue); padding:4px 6px; font-family:inherit;
+      font-size:13px; background:var(--white); outline:none;
+    }
+    .feat-edit-textarea { font-size:12px; resize:vertical; min-height:50px; }
+    .feat-save-edit { width:auto !important; padding:0 10px; font-size:11px; border-color:var(--blue); color:var(--blue); font-weight:700; }
+    .feat-cancel-edit { width:auto !important; padding:0 10px; font-size:11px; }
+
+    /* ── Ruter ── */
+    .rt-controls { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+    .rt-form { background:var(--surface); border:1px solid var(--line); padding:14px; margin-bottom:14px; }
+
+    .rt-offline { padding:20px; background:var(--surface); border:1px dashed var(--line); text-align:center; }
+    .rt-offline-icon { font-size:2rem; margin-bottom:8px; }
+    .rt-offline-title { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink); margin-bottom:4px; }
+    .rt-offline-reason { font-size:12px; color:var(--ink-light); margin-bottom:14px; font-family:'DM Mono',monospace; }
+    .rt-offline-steps { text-align:left; max-width:520px; margin:0 auto 14px; font-size:12px; color:var(--ink); line-height:1.7; }
+    .rt-offline-steps code { font-family:'DM Mono',monospace; font-size:11px; background:var(--white); padding:1px 5px; border:1px solid var(--line); }
+    .rt-offline-steps ol { margin:6px 0 0 20px; padding:0; }
+    .rt-offline-cfg { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; font-size:11px; color:var(--ink-light); }
+    .rt-offline-cfg code { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink); }
+
+    .rt-hero { padding:14px; border:1px solid var(--line); background:var(--white); border-left:4px solid var(--line); margin-bottom:14px; }
+    .rt-hero-excellent { border-left-color:#4caf50; }
+    .rt-hero-good      { border-left-color:#8bc34a; }
+    .rt-hero-fair      { border-left-color:#ffc107; }
+    .rt-hero-poor      { border-left-color:#ff9800; }
+    .rt-hero-offline   { border-left-color:#f44336; }
+    .rt-hero-row { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .rt-hero-cell { text-align:center; }
+    .rt-hero-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); }
+    .rt-hero-val { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:1.3rem; color:var(--ink); margin:3px 0 2px; }
+    .rt-hero-sub { font-size:11px; color:var(--ink-light); letter-spacing:.02em; }
+
+    .rt-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    @media (min-width:600px) { .rt-grid { grid-template-columns:repeat(5,1fr); } }
+    .rt-stat { padding:10px; background:var(--white); border:1px solid var(--line); text-align:center; }
+    .rt-stat-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); }
+    .rt-stat-val { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1rem; color:var(--ink); margin-top:4px; }
+
+    .rt-meta { text-align:right; font-size:10px; color:var(--ink-light); margin-top:10px; font-style:italic; }
+    .rt-clients { border:1px solid var(--line); background:var(--white); }
+    .rt-client { display:flex; justify-content:space-between; padding:6px 12px; border-bottom:1px solid var(--line); font-size:12px; }
+    .rt-client:last-child { border-bottom:none; }
+    .rt-client-mac { font-family:'DM Mono',monospace; }
+    .rt-client-signal { color:var(--ink-light); }
+    .rt-clients-empty { padding:12px; background:var(--surface); border:1px solid var(--line); font-size:12px; color:var(--ink-light); text-align:center; font-style:italic; }
+  </style>`;
+}

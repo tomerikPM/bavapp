@@ -18,7 +18,8 @@ const PAGES = {
   assistant:     () => import('./pages/assistant.js'),
   docs:          () => import('./pages/docs.js'),
   maintenance:   () => import('./pages/maintenance.js'),
-  vessel:        () => import('./pages/vessel.js?v=3'),
+  vessel:        () => import('./pages/vessel.js?v=9'),
+  system:        () => import('./pages/system.js'),
 };
 
 const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine', 'map'];
@@ -27,7 +28,18 @@ let _currentPage   = null;
 let _currentModule = null;
 const _cache = {};
 
+// Auto-detect backend_url: lokalt → localhost:3001, deployed → samme origin.
+// Unngår at alle 20 filer må oppdateres med fallback-logikk.
+function bootstrapBackendUrl() {
+  if (localStorage.getItem('backend_url')) return;  // respekter brukerens egen konfig
+  const { hostname, origin } = window.location;
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+               || /^(192\.168|10\.|169\.254|172\.(1[6-9]|2\d|3[01]))\./.test(hostname);
+  localStorage.setItem('backend_url', isLocal ? 'http://localhost:3001' : origin);
+}
+
 export async function init() {
+  bootstrapBackendUrl();
   registerServiceWorker();
   setupNav();
   SK.start();
