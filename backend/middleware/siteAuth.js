@@ -1,17 +1,53 @@
 'use strict';
-// middleware/siteAuth.js — HTTP Basic Auth-gate for ikke-lokal tilgang.
+// middleware/siteAuth.js — HTTP Basic Auth + session-cookie for ikke-lokal tilgang.
 //
-// Hensikt: La utvikling på localhost + tilgang fra boatens lokale nett
-// (192.168.x / 10.x / 169.254.x) fortsette uten friksjon, men kreve
-// brukernavn + passord for alt som kommer utenfra (Railway-URL osv).
+// Flyt:
+//   1. Første besøk: Browser får 401 + WWW-Authenticate → Basic Auth-prompt.
+//   2. Korrekt passord: Server setter signert HMAC-cookie (30 dager).
+//   3. Senere requests: Cookie sjekkes først — ingen re-prompt.
+//
+// Dette løser Safari/iOS-problemet der browseren "glemmer" Basic Auth mellom
+// fetch()-kall og prompter på hvert klikk.
 //
 // Miljøvariabler:
 //   SITE_PASSWORD — påkrevd for at gaten skal aktiveres
 //   SITE_USER     — valgfri, default "bavapp"
-//
-// Hvis SITE_PASSWORD ikke er satt, slippes alle gjennom (dev-scenarie).
 
 const crypto = require('crypto');
+
+const COOKIE_NAME = 'bavapp_session';
+const COOKIE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;  // 30 dager
+
+function signToken(user, password) {
+  const data = `${user}.${Date.now()}`;
+  const sig  = crypto.createHmac('sha256', password).update(data).digest('hex');
+  return `${data}.${sig}`;
+}
+
+function validToken(token, password) {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const [user, tsStr, sig] = parts;
+  const expected = crypto.createHmac('sha256', password).update(`${user}.${tsStr}`).digest('hex');
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) return false;
+  } catch { return false; }
+  const ts = parseInt(tsStr, 10);
+  if (!Number.isFinite(ts)) return false;
+  if (Date.now() - ts > COOKIE_MAX_AGE_MS) return false;
+  return true;
+}
+
+function parseCookies(header) {
+  if (!header) return {};
+  const out = {};
+  for (const part of header.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k) out[k] = decodeURIComponent(rest.join('='));
+  }
+  return out;
+}
 
 function isLoopbackOrLan(req) {
   const h = (req.hostname || '').toLowerCase();
@@ -40,37 +76,51 @@ function safeEqual(a, b) {
 
 module.exports = function siteAuth(req, res, next) {
   const password = process.env.SITE_PASSWORD;
-  // Ikke konfigurert → ingen gate (dev-modus)
-  if (!password) return next();
+  if (!password) return next();  // dev-modus
 
-  // Ingen gate for localhost / LAN / healthcheck
   if (req.path === '/api/health')  return next();
   if (isLoopbackOrLan(req))        return next();
 
-  const user   = process.env.SITE_USER || 'bavapp';
+  const user = process.env.SITE_USER || 'bavapp';
+
+  // 1. Sjekk cookie først — raskest og unngår re-prompts
+  const cookies = parseCookies(req.headers.cookie);
+  if (validToken(cookies[COOKIE_NAME], password)) return next();
+
+  // 2. Sjekk Basic Auth
   const header = req.headers.authorization;
+  if (header && header.startsWith('Basic ')) {
+    let provided;
+    try {
+      provided = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    } catch {
+      return sendAuthChallenge(res, 'Ugyldig autentiseringshode');
+    }
+    const idx = provided.indexOf(':');
+    const providedUser = idx >= 0 ? provided.slice(0, idx) : '';
+    const providedPass = idx >= 0 ? provided.slice(idx + 1) : '';
 
-  if (!header || !header.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="Bavapp"');
-    return res.status(401).send('Autentisering kreves');
+    if (safeEqual(providedUser, user) && safeEqual(providedPass, password)) {
+      // Sett session-cookie så browseren slipper å bruke Basic Auth for hvert kall
+      const token = signToken(user, password);
+      res.cookie(COOKIE_NAME, token, {
+        httpOnly: true,
+        secure:   req.secure || req.headers['x-forwarded-proto'] === 'https',
+        sameSite: 'lax',
+        maxAge:   COOKIE_MAX_AGE_MS,
+        path:     '/',
+      });
+      return next();
+    }
+
+    return sendAuthChallenge(res, 'Ugyldig brukernavn eller passord');
   }
 
-  let provided;
-  try {
-    provided = Buffer.from(header.slice(6), 'base64').toString('utf8');
-  } catch {
-    res.set('WWW-Authenticate', 'Basic realm="Bavapp"');
-    return res.status(401).send('Ugyldig autentiseringshode');
-  }
-  const idx = provided.indexOf(':');
-  const providedUser = idx >= 0 ? provided.slice(0, idx) : '';
-  const providedPass = idx >= 0 ? provided.slice(idx + 1) : '';
-
-  const userOk = safeEqual(providedUser, user);
-  const passOk = safeEqual(providedPass, password);
-
-  if (userOk && passOk) return next();
-
-  res.set('WWW-Authenticate', 'Basic realm="Bavapp"');
-  return res.status(401).send('Ugyldig brukernavn eller passord');
+  // 3. Ingen auth ennå — be browser prompte
+  sendAuthChallenge(res, 'Autentisering kreves');
 };
+
+function sendAuthChallenge(res, message) {
+  res.set('WWW-Authenticate', 'Basic realm="Bavapp"');
+  res.status(401).send(message);
+}
