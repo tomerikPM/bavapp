@@ -46,10 +46,10 @@
 
 ### Cerbo GX MK2 (installert april 2026, firmware v3.72 Large)
 - Signal K v2.19.1 lytter på port 3000, åpen lokalt (ingen auth)
-- VE.Direct-port ttyS7: SmartShunt 500A → `electrical.batteries.279.*` (full datasett: SOC, voltage, current, power)
+- VE.Direct-port ttyS7: **BMV-712 Smart** → `electrical.batteries.279.*` (full datasett: SOC, voltage, current, power). `electrical.batteries.279-second.voltage` er BMV-712 aux-inngang (sannsynligvis starter-spenning).
 - N2K via YDEG-04N: starterbatteri-spenning → `electrical.batteries.0.voltage`
 - N2K via YDEG-04N: motor-data → `propulsion.port.*` (NB: ikke `propulsion.0.*`, og kjølevæsketemp er `temperature` ikke `coolantTemperature`; fuel rate er `fuel.rate` i m³/s)
-- BMV-712 Smart: vises ikke i SK-tre, sannsynlig device-instans-konflikt med SmartShunt (åpen tråd)
+- **SmartShunt 500A: vises ikke på Cerbo** — sannsynlig kun Bluetooth-koblet eller VE.Direct-kabel ikke plugget i. Åpen tråd: avgjør om den skal kobles til Cerbo, eller om BMV-712 alene dekker behovet.
 - Shore power: ingen direkte deteksjon. **Inferens i `signalk.js`**: husbank lader (>1A) + motor av (RPM <100) → landstrøm tilkoblet. Forutsetter ingen solar (stemmer for Summer). UI viser "ukjent" hvis ikke kan utledes.
 - Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
 
@@ -72,7 +72,7 @@
 
 1. **SSH på Cerbo** — port 22 closed selv på Unsecured-profil + root-passord (Venus OS v3.72). Trenger USB/SD-stick med setpasswd.txt-trick. Blokker for deploy av Bavapp på Cerbo.
 2. **Deploy Bavapp på Cerbo** — venter på SSH. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
-3. **BMV-712 mangler i Signal K** — sannsynlig device-instans-konflikt med SmartShunt (begge på 279). Endre instans i VictronConnect-app via Bluetooth (PIN 000000).
+3. **SmartShunt 500A når ikke Cerbo** — sjekk fysisk VE.Direct-kabel. Hvis SmartShunt skal kobles på, finn ledig VE.Direct-port på Cerbo. BMV-712 er hovedmonitor i mellomtiden.
 4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
 5. **RUT200** — siste brikke for stabil ekstern tilgang før hotspot-avhengighet faller
 6. **Cloudflare Tunnel** — erstatt ngrok når RUT200 er på
