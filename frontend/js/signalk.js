@@ -146,7 +146,15 @@ export const get = {
   houseCurrent: (s = _state) => s['electrical.batteries.279.current']  ?? null,
   housePower:   (s = _state) => s['electrical.batteries.279.power']    ?? null,
   startVolt:    (s = _state) => s['electrical.batteries.0.voltage']    ?? null,
-  shorepower:   (s = _state) => s['electrical.ac.shore.available']     ?? null,
+  shorepower:   (s = _state) => {
+    const explicit = s['electrical.ac.shore.available'];
+    if (explicit != null) return explicit;
+    // Cerbo har ingen shore-detect; utled: lading med motor av = landstrøm (ingen solar)
+    const cur = s['electrical.batteries.279.current'];
+    const rpm = (s['propulsion.port.revolutions'] ?? 0) * 60;
+    if (cur != null && cur > 1 && rpm < 100) return true;
+    return null;
+  },
   inverter:     (s = _state) => s['electrical.inverter.0.state'] === 'on',
 
   // Tank

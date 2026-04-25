@@ -50,7 +50,7 @@
 - N2K via YDEG-04N: starterbatteri-spenning → `electrical.batteries.0.voltage`
 - N2K via YDEG-04N: motor-data → `propulsion.port.*` (NB: ikke `propulsion.0.*`, og kjølevæsketemp er `temperature` ikke `coolantTemperature`; fuel rate er `fuel.rate` i m³/s)
 - BMV-712 Smart: vises ikke i SK-tre, sannsynlig device-instans-konflikt med SmartShunt (åpen tråd)
-- Shore power: ingen automatisk deteksjon (krever Multi/Quattro-inverter eller GX digital input). UI viser "ukjent".
+- Shore power: ingen direkte deteksjon. **Inferens i `signalk.js`**: husbank lader (>1A) + motor av (RPM <100) → landstrøm tilkoblet. Forutsetter ingen solar (stemmer for Summer). UI viser "ukjent" hvis ikke kan utledes.
 - Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
 
 ### Planlagt / ikke installert
