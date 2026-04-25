@@ -8,7 +8,7 @@ const db      = require('../db');
 // Konfig: paths som overvåkes med normalområder og beskrivelser
 const MONITORED = [
   {
-    path:    'propulsion.0.coolantTemperature',
+    path:    'propulsion.port.temperature',
     label:   'Kjølevannstemperatur',
     unit:    '°C',
     scale:   v => Math.round((v - 273.15) * 10) / 10,
@@ -18,7 +18,7 @@ const MONITORED = [
     engineOnly: true,
   },
   {
-    path:    'propulsion.0.oilPressure',
+    path:    'propulsion.port.oilPressure',
     label:   'Oljetrykk',
     unit:    'bar',
     scale:   v => Math.round((v / 100000) * 100) / 100,
@@ -28,7 +28,7 @@ const MONITORED = [
     engineOnly: true,
   },
   {
-    path:    'propulsion.0.fuelRate',
+    path:    'propulsion.port.fuel.rate',
     label:   'Drivstofforbruk',
     unit:    'L/h',
     scale:   v => Math.round(v * 3600000 * 10) / 10,
@@ -36,7 +36,7 @@ const MONITORED = [
     engineOnly: true,
   },
   {
-    path:    'electrical.batteries.0.capacity.stateOfCharge',
+    path:    'electrical.batteries.279.capacity.stateOfCharge',
     label:   'Husbatteri SOC',
     unit:    '%',
     scale:   v => Math.round(v * 100),
@@ -46,7 +46,7 @@ const MONITORED = [
     engineOnly: false,
   },
   {
-    path:    'electrical.batteries.0.voltage',
+    path:    'electrical.batteries.279.voltage',
     label:   'Husbatteri spenning',
     unit:    'V',
     scale:   v => Math.round(v * 100) / 100,
@@ -189,10 +189,10 @@ router.get('/engine-health', (req, res) => {
     `).all();
 
     const enginePaths = [
-      { path: 'propulsion.0.coolantTemperature', label: 'Kjølevann', unit: '°C', scale: v => Math.round((v-273.15)*10)/10 },
-      { path: 'propulsion.0.oilPressure',        label: 'Oljetrykk', unit: 'bar', scale: v => Math.round((v/100000)*100)/100 },
-      { path: 'propulsion.0.fuelRate',           label: 'Forbruk',   unit: 'L/h', scale: v => Math.round(v*3600000*10)/10 },
-      { path: 'propulsion.0.revolutions',        label: 'RPM',       unit: 'rpm', scale: v => Math.round(v*60) },
+      { path: 'propulsion.port.temperature', label: 'Kjølevann', unit: '°C', scale: v => Math.round((v-273.15)*10)/10 },
+      { path: 'propulsion.port.oilPressure',        label: 'Oljetrykk', unit: 'bar', scale: v => Math.round((v/100000)*100)/100 },
+      { path: 'propulsion.port.fuel.rate',           label: 'Forbruk',   unit: 'L/h', scale: v => Math.round(v*3600000*10)/10 },
+      { path: 'propulsion.port.revolutions',        label: 'RPM',       unit: 'rpm', scale: v => Math.round(v*60) },
     ];
 
     const sessions = trips.map(t => {

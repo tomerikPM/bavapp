@@ -297,7 +297,7 @@ async function renderCV(container) {
     }
 
     const sessAvgCool = healthRes.sessions
-      .map(s=>s.stats['propulsion.0.coolantTemperature']?.avg).filter(Boolean);
+      .map(s=>s.stats['propulsion.port.temperature']?.avg).filter(Boolean);
     const avgCoolant = sessAvgCool.length
       ? (sessAvgCool.reduce((a,b)=>a+b,0)/sessAvgCool.length).toFixed(0) : null;
 
@@ -509,14 +509,14 @@ async function loadTripDetail(tripId) {
 
     const t      = tripRes;
     const stats  = statsRes.stats || {};
-    const maxRpm    = stats['propulsion.0.revolutions']        ? Math.round(stats['propulsion.0.revolutions'].max*60) : null;
-    const avgRpm    = stats['propulsion.0.revolutions']        ? Math.round(stats['propulsion.0.revolutions'].avg*60) : null;
-    const maxCool   = stats['propulsion.0.coolantTemperature'] ? Math.round(stats['propulsion.0.coolantTemperature'].max-273.15) : null;
-    const avgCool   = stats['propulsion.0.coolantTemperature'] ? Math.round(stats['propulsion.0.coolantTemperature'].avg-273.15) : null;
-    const maxOilP   = stats['propulsion.0.oilPressure']        ? Math.round((stats['propulsion.0.oilPressure'].max/100000)*10)/10 : null;
-    const maxLoad   = stats['propulsion.0.engineLoad']         ? Math.round(stats['propulsion.0.engineLoad'].max*100) : null;
-    const avgFuelLH = stats['propulsion.0.fuelRate']           ? Math.round(stats['propulsion.0.fuelRate'].avg*3600000*10)/10 : null;
-    const minSoc    = stats['electrical.batteries.0.capacity.stateOfCharge'] ? Math.round(stats['electrical.batteries.0.capacity.stateOfCharge'].min*100) : null;
+    const maxRpm    = stats['propulsion.port.revolutions']        ? Math.round(stats['propulsion.port.revolutions'].max*60) : null;
+    const avgRpm    = stats['propulsion.port.revolutions']        ? Math.round(stats['propulsion.port.revolutions'].avg*60) : null;
+    const maxCool   = stats['propulsion.port.temperature'] ? Math.round(stats['propulsion.port.temperature'].max-273.15) : null;
+    const avgCool   = stats['propulsion.port.temperature'] ? Math.round(stats['propulsion.port.temperature'].avg-273.15) : null;
+    const maxOilP   = stats['propulsion.port.oilPressure']        ? Math.round((stats['propulsion.port.oilPressure'].max/100000)*10)/10 : null;
+    const maxLoad   = stats['propulsion.port.engineLoad']         ? Math.round(stats['propulsion.port.engineLoad'].max*100) : null;
+    const avgFuelLH = stats['propulsion.port.fuel.rate']           ? Math.round(stats['propulsion.port.fuel.rate'].avg*3600000*10)/10 : null;
+    const minSoc    = stats['electrical.batteries.279.capacity.stateOfCharge'] ? Math.round(stats['electrical.batteries.279.capacity.stateOfCharge'].min*100) : null;
     const maxSpdKn  = stats['navigation.speedOverGround']      ? Math.round(stats['navigation.speedOverGround'].max*1.94384*10)/10 : null;
     const totalFuel = statsRes.total_fuel_l;
     const dur       = t.end_ts ? Math.round((new Date(t.end_ts)-new Date(t.start_ts))/60000) : null;
@@ -552,10 +552,10 @@ async function loadTripDetail(tripId) {
 
     await ensureChartJS();
     const paths = {
-      rpm:  { path:'propulsion.0.revolutions',                     scale:v=>Math.round(v*60),          color:'#003b7e', unit:'rpm', yMax:3800 },
-      cool: { path:'propulsion.0.coolantTemperature',               scale:v=>Math.round(v-273.15),      color:'#b01020', unit:'°C',  yMax:110  },
-      soc:  { path:'electrical.batteries.0.capacity.stateOfCharge', scale:v=>Math.round(v*100),         color:'#1a7040', unit:'%',   yMax:100  },
-      fuel: { path:'propulsion.0.fuelRate',                         scale:v=>Math.round(v*3600000*10)/10,color:'#e65c00', unit:'L/h', yMax:null },
+      rpm:  { path:'propulsion.port.revolutions',                     scale:v=>Math.round(v*60),          color:'#003b7e', unit:'rpm', yMax:3800 },
+      cool: { path:'propulsion.port.temperature',               scale:v=>Math.round(v-273.15),      color:'#b01020', unit:'°C',  yMax:110  },
+      soc:  { path:'electrical.batteries.279.capacity.stateOfCharge', scale:v=>Math.round(v*100),         color:'#1a7040', unit:'%',   yMax:100  },
+      fuel: { path:'propulsion.port.fuel.rate',                         scale:v=>Math.round(v*3600000*10)/10,color:'#e65c00', unit:'L/h', yMax:null },
     };
     const allData = await Promise.all(
       Object.entries(paths).map(([key,cfg]) =>

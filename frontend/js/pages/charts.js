@@ -34,7 +34,7 @@ async function ensureLibs() {
 const CHARTS = [
   {
     id: 'ch-soc',  title: 'Batteri SOC',          unit: '%',   color: '#003b7e',
-    path: 'electrical.batteries.0.capacity.stateOfCharge',
+    path: 'electrical.batteries.279.capacity.stateOfCharge',
     scale: v => +(v * 100).toFixed(1), fill: true, yMin: 0, yMax: 100,
     alarms: [
       { value: 30, color: '#b86000', label: '30% advarsel', pos: 'start' },
@@ -44,20 +44,20 @@ const CHARTS = [
   },
   {
     id: 'ch-volt', title: 'Batterispenning',       unit: 'V',   color: '#1a7040',
-    path: 'electrical.batteries.0.voltage',
+    path: 'electrical.batteries.279.voltage',
     scale: v => +v.toFixed(2), fill: true, yMin: 11.0, yMax: 14.8, alarms: [],
     desc: 'Spenning husbatteri',
   },
   {
     id: 'ch-cur',  title: 'Batteristrøm',          unit: 'A',   color: '#b86000',
-    path: 'electrical.batteries.0.current',
+    path: 'electrical.batteries.279.current',
     scale: v => +v.toFixed(1), fill: false, yMin: null, yMax: null,
     alarms: [{ value: 0, color: '#c8c8c8', label: '0A', pos: 'start' }],
     desc: 'Positiv = lader · Negativ = forbruk',
   },
   {
     id: 'ch-cool', title: 'Kjølevannstemperatur',  unit: '°C',  color: '#b01020',
-    path: 'propulsion.0.coolantTemperature',
+    path: 'propulsion.port.temperature',
     scale: v => +(v - 273.15).toFixed(1), fill: false, yMin: 0, yMax: 110,
     alarms: [
       { value: 90,  color: '#b86000', label: '90°C advarsel', pos: 'start' },
@@ -67,7 +67,7 @@ const CHARTS = [
   },
   {
     id: 'ch-rpm',  title: 'Motor RPM',             unit: 'rpm', color: '#003b7e',
-    path: 'propulsion.0.revolutions',
+    path: 'propulsion.port.revolutions',
     scale: v => Math.round(v * 60), fill: true, yMin: 0, yMax: 4000, alarms: [],
     desc: 'Volvo Penta D6 330',
   },
@@ -284,10 +284,10 @@ async function loadKPI() {
   if (!box) return;
   try {
     const l = await sensors.latest();
-    const s = l['electrical.batteries.0.capacity.stateOfCharge'];
-    const h = l['propulsion.0.runTime'];
+    const s = l['electrical.batteries.279.capacity.stateOfCharge'];
+    const h = l['propulsion.port.runTime'];
     const w = l['environment.water.temperature'];
-    const c = l['propulsion.0.coolantTemperature'];
+    const c = l['propulsion.port.temperature'];
     box.innerHTML = [
       { l: 'Batteri SOC', v: s ? Math.round(s.value*100)+'%'              : '—', warn: s && s.value < 0.3 },
       { l: 'Gangtimer',   v: h ? Math.round(h.value/3600).toLocaleString('no') : '—' },

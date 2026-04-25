@@ -5,11 +5,11 @@ import { toast } from '../app.js';
 const BASE = () => localStorage.getItem('backend_url') || 'http://localhost:3001';
 
 const PATH_META = {
-  'propulsion.0.coolantTemperature': { icon: '🌡', color: '#b01020', normal: '70–95°C' },
-  'propulsion.0.oilPressure':        { icon: '⚙',  color: '#e65c00', normal: '2.0–5.5 bar' },
-  'propulsion.0.fuelRate':           { icon: '⛽', color: '#b86000', normal: '<70 L/h' },
-  'electrical.batteries.0.capacity.stateOfCharge': { icon: '🔋', color: '#1a7040', normal: '20–100%' },
-  'electrical.batteries.0.voltage':  { icon: '⚡', color: '#003b7e', normal: '12.2–14.8V' },
+  'propulsion.port.temperature': { icon: '🌡', color: '#b01020', normal: '70–95°C' },
+  'propulsion.port.oilPressure':        { icon: '⚙',  color: '#e65c00', normal: '2.0–5.5 bar' },
+  'propulsion.port.fuel.rate':           { icon: '⛽', color: '#b86000', normal: '<70 L/h' },
+  'electrical.batteries.279.capacity.stateOfCharge': { icon: '🔋', color: '#1a7040', normal: '20–100%' },
+  'electrical.batteries.279.voltage':  { icon: '⚡', color: '#003b7e', normal: '12.2–14.8V' },
 };
 
 export async function render(container) {

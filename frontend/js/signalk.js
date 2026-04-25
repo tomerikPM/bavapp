@@ -113,43 +113,40 @@ export const get = {
   sogKnots:     (s = _state) => (get.sog(s) ?? 0) * 1.94384,
 
   // Motor
-  rpm:          (s = _state) => Math.round((s['propulsion.0.revolutions'] ?? 0) * 60),
-  engineOn:     (s = _state) => (get.rpm(s) ?? 0) > 100 || s['propulsion.0.state'] === 'started',
-  engineHours:  (s = _state) => s['propulsion.0.runTime'] != null
-                                  ? s['propulsion.0.runTime'] / 3600 : null,
-  coolant:      (s = _state) => s['propulsion.0.coolantTemperature'] != null
-                                  ? Math.round(s['propulsion.0.coolantTemperature'] - 273.15) : null,
-  oilTemp:      (s = _state) => s['propulsion.0.oilTemperature'] != null
-                                  ? Math.round(s['propulsion.0.oilTemperature'] - 273.15) : null,
-  oilPressureBar: (s = _state) => s['propulsion.0.oilPressure'] != null
-                                  ? Math.round((s['propulsion.0.oilPressure'] / 100000) * 10) / 10 : null,
-  engineLoad:   (s = _state) => s['propulsion.0.engineLoad'] != null
-                                  ? Math.round(s['propulsion.0.engineLoad'] * 100) : null,
-  boostKpa:     (s = _state) => s['propulsion.0.boostPressure'] != null
-                                  ? Math.round(s['propulsion.0.boostPressure'] / 1000) : null,
-  fuelRateLH:   (s = _state) => s['propulsion.0.fuelRate'] != null
-                                  ? Math.round(s['propulsion.0.fuelRate'] * 3600000 * 10) / 10 : null,
-  gear:         (s = _state) => s['propulsion.0.transmission.gear'] ?? null,
-  alternatorVolt: (s = _state) => s['electrical.alternators.0.voltage'] ?? null,
+  rpm:          (s = _state) => Math.round((s['propulsion.port.revolutions'] ?? 0) * 60),
+  engineOn:     (s = _state) => (get.rpm(s) ?? 0) > 100 || s['propulsion.port.state'] === 'started',
+  engineHours:  (s = _state) => s['propulsion.port.runTime'] != null
+                                  ? s['propulsion.port.runTime'] / 3600 : null,
+  coolant:      (s = _state) => s['propulsion.port.temperature'] != null
+                                  ? Math.round(s['propulsion.port.temperature'] - 273.15) : null,
+  oilTemp:      (s = _state) => s['propulsion.port.oilTemperature'] != null
+                                  ? Math.round(s['propulsion.port.oilTemperature'] - 273.15) : null,
+  oilPressureBar: (s = _state) => s['propulsion.port.oilPressure'] != null
+                                  ? Math.round((s['propulsion.port.oilPressure'] / 100000) * 10) / 10 : null,
+  engineLoad:   (s = _state) => s['propulsion.port.engineLoad'] != null
+                                  ? Math.round(s['propulsion.port.engineLoad'] * 100) : null,
+  boostKpa:     (s = _state) => s['propulsion.port.boostPressure'] != null
+                                  ? Math.round(s['propulsion.port.boostPressure'] / 1000) : null,
+  fuelRateLH:   (s = _state) => s['propulsion.port.fuel.rate'] != null
+                                  ? Math.round(s['propulsion.port.fuel.rate'] * 3600000 * 10) / 10 : null,
+  gear:         (s = _state) => s['propulsion.port.transmission.gear'] ?? null,
+  alternatorVolt: (s = _state) => s['propulsion.port.alternatorVoltage']
+                                  ?? s['electrical.alternators.0.voltage'] ?? null,
 
   // Motor-alarmer: returnerer array av aktive alarm-objekter
   engineAlarms: (s = _state) => {
-    const raw = s['propulsion.0.alarms'];
+    const raw = s['propulsion.port.alarms'];
     return Array.isArray(raw) ? raw : [];
   },
 
-  // Batterier
-  houseSoc:     (s = _state) => s['electrical.batteries.0.capacity.stateOfCharge'] != null
-                                  ? Math.round(s['electrical.batteries.0.capacity.stateOfCharge'] * 100) : null,
-  houseVolt:    (s = _state) => s['electrical.batteries.0.voltage']  ?? null,
-  houseCurrent: (s = _state) => s['electrical.batteries.0.current']  ?? null,
-  startSoc:     (s = _state) => s['electrical.batteries.1.capacity.stateOfCharge'] != null
-                                  ? Math.round(s['electrical.batteries.1.capacity.stateOfCharge'] * 100) : null,
-  startVolt:    (s = _state) => s['electrical.batteries.1.voltage']  ?? null,
-  thrusterSoc:  (s = _state) => s['electrical.batteries.2.capacity.stateOfCharge'] != null
-                                  ? Math.round(s['electrical.batteries.2.capacity.stateOfCharge'] * 100) : null,
-  thrusterVolt: (s = _state) => s['electrical.batteries.2.voltage']  ?? null,
-  shorepower:   (s = _state) => s['electrical.ac.shore.available']   ?? false,
+  // Batterier — Cerbo-instans 279 = SmartShunt (husbank), 0 = starter (N2K)
+  houseSoc:     (s = _state) => s['electrical.batteries.279.capacity.stateOfCharge'] != null
+                                  ? Math.round(s['electrical.batteries.279.capacity.stateOfCharge'] * 100) : null,
+  houseVolt:    (s = _state) => s['electrical.batteries.279.voltage']  ?? null,
+  houseCurrent: (s = _state) => s['electrical.batteries.279.current']  ?? null,
+  housePower:   (s = _state) => s['electrical.batteries.279.power']    ?? null,
+  startVolt:    (s = _state) => s['electrical.batteries.0.voltage']    ?? null,
+  shorepower:   (s = _state) => s['electrical.ac.shore.available']     ?? null,
   inverter:     (s = _state) => s['electrical.inverter.0.state'] === 'on',
 
   // Tank

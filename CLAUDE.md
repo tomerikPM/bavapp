@@ -35,20 +35,29 @@
 - 2900W pure sine inverter, 230V landstrøm med 3× B16 ABL Sursum
 
 ### Navigasjon (installert)
-- Garmin GPSMAP 1223xsv + GT15M-IH svinger (v43.02)
+- **Ny plotter installert** (april 2026)
 - Autopilot: Garmin GHP Reactor (Compact 1.0L pump + Impact Reactor ECU S/N 4P5001717 + GHC20)
 - GPS-antenne: Garmin GPS 19x NMEA 2000
-- Yacht Devices YDEG-04N engine gateway (kjøpt, ikke installert)
+- Yacht Devices YDEG-04N engine gateway — installert, leverer N2K til Cerbo
 
 ### Oppvarming (installert)
 - Webasto AirTop Evo 3900 Marine med W-Bus (K-line) / MC04/05-panel
 - JDTech FTDI USB-to-KKL kabel (FT232RL chip) — kjøpt, ikke integrert
 
+### Cerbo GX MK2 (installert april 2026, firmware v3.72 Large)
+- Signal K v2.19.1 lytter på port 3000, åpen lokalt (ingen auth)
+- VE.Direct-port ttyS7: SmartShunt 500A → `electrical.batteries.279.*` (full datasett: SOC, voltage, current, power)
+- N2K via YDEG-04N: starterbatteri-spenning → `electrical.batteries.0.voltage`
+- N2K via YDEG-04N: motor-data → `propulsion.port.*` (NB: ikke `propulsion.0.*`, og kjølevæsketemp er `temperature` ikke `coolantTemperature`; fuel rate er `fuel.rate` i m³/s)
+- BMV-712 Smart: vises ikke i SK-tre, sannsynlig device-instans-konflikt med SmartShunt (åpen tråd)
+- Shore power: ingen automatisk deteksjon (krever Multi/Quattro-inverter eller GX digital input). UI viser "ukjent".
+- Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
+
 ### Planlagt / ikke installert
-- **Victron Cerbo GX MK2** — kjøpt, ikke montert. Nøkkelkomponent som låser opp Signal K live-data fra N2K, autopilot-status, Garmin plotter-navigasjon via Signal K course API (PGN 129284), Webasto W-Bus Node-RED flows, og VE.CAN-integrasjon.
 - Cloudflare Tunnel (erstatter ngrok)
 - Kystverket fartsgrense-integrasjon (WMS layer_754)
 - Bow thruster status via Cerbo GX digital inputs
+- RUT200 router (siste brikke for stabil ekstern tilgang)
 
 ## Viktig lærdom og gotchas
 
@@ -61,12 +70,15 @@
 
 ## Åpne tråder (prioritert)
 
-1. **Cloudflare Tunnel** — erstatt ngrok for stabil remote URL
-2. **Cerbo GX-installasjon** — låser opp halvparten av planlagt funksjonalitet
-3. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo GX
-4. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
-5. **Bekreft Cristec-lader-modell** — bilde av typeskilt
-6. **Verifiser SmartShunt/BMV-712 bank-plassering** (hus vs. start)
+1. **SSH på Cerbo** — port 22 closed selv på Unsecured-profil + root-passord (Venus OS v3.72). Trenger USB/SD-stick med setpasswd.txt-trick. Blokker for deploy av Bavapp på Cerbo.
+2. **Deploy Bavapp på Cerbo** — venter på SSH. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
+3. **BMV-712 mangler i Signal K** — sannsynlig device-instans-konflikt med SmartShunt (begge på 279). Endre instans i VictronConnect-app via Bluetooth (PIN 000000).
+4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
+5. **RUT200** — siste brikke for stabil ekstern tilgang før hotspot-avhengighet faller
+6. **Cloudflare Tunnel** — erstatt ngrok når RUT200 er på
+7. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo Node-RED-konfig
+8. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
+9. **Bekreft Cristec-lader-modell** — bilde av typeskilt
 
 ## Eksterne ressurser
 

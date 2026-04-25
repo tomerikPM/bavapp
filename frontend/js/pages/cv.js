@@ -82,7 +82,7 @@ function renderCV(container, allTrips, costSummary, healthData) {
   }
 
   const sessAvgCool = healthData.sessions
-    .map(s => s.stats['propulsion.0.coolantTemperature']?.avg)
+    .map(s => s.stats['propulsion.port.temperature']?.avg)
     .filter(Boolean);
   const avgCoolant = sessAvgCool.length
     ? (sessAvgCool.reduce((a,b)=>a+b,0)/sessAvgCool.length).toFixed(0) : null;

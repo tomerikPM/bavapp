@@ -126,10 +126,7 @@ export async function render(container) {
     <div class="sgrid">
       ${sc('h-soc2',  'Hus SOC',      '—', '', 'Victron', '')}
       ${sc('h-volt2', 'Hus spenning', '—', '', 'Victron', '')}
-      ${sc('s-soc',   'Start SOC',    '—', '', 'Victron', '')}
-      ${sc('s-volt',  'Start V',      '—', '', 'Victron', '')}
-      ${sc('t-soc',   'Thruster SOC', '—', '', 'Victron', '')}
-      ${sc('t-volt',  'Thruster V',   '—', '', 'Victron', '')}
+      ${sc('s-volt',  'Start V',      '—', '', 'NMEA 2000', '')}
     </div>
 
     <!-- ── Ladekilder ── -->
@@ -238,7 +235,7 @@ async function loadSocChart() {
   try {
     const from = new Date(Date.now() - 3600000).toISOString();
     const { data } = await sensors.history(
-      'electrical.batteries.0.capacity.stateOfCharge', { from, limit: 120 }
+      'electrical.batteries.279.capacity.stateOfCharge', { from, limit: 120 }
     );
     if (data && data.length >= 2) {
       const sorted = [...data].reverse();
@@ -378,10 +375,7 @@ export function onSkUpdate(state) {
   // Alle batterier
   setCell('h-soc2',  soc  != null ? soc + '%'                      : '—', 'husbatteri',   socCls(soc));
   setCell('h-volt2', volt != null ? volt.toFixed(2) + ' V'         : '—', '',             voltCls(volt));
-  setCell('s-soc',   SK.get.startSoc(state)    != null ? SK.get.startSoc(state)    + '%' : '—', 'startbatteri', socCls(SK.get.startSoc(state)));
-  setCell('s-volt',  SK.get.startVolt(state)   != null ? SK.get.startVolt(state).toFixed(1) + ' V' : '—', '', '');
-  setCell('t-soc',   SK.get.thrusterSoc(state) != null ? SK.get.thrusterSoc(state) + '%' : '—', 'thruster',     socCls(SK.get.thrusterSoc(state)));
-  setCell('t-volt',  SK.get.thrusterVolt(state)!= null ? SK.get.thrusterVolt(state).toFixed(1) + ' V' : '—', '', '');
+  setCell('s-volt',  SK.get.startVolt(state)   != null ? SK.get.startVolt(state).toFixed(1) + ' V' : '—', 'startbatteri', '');
 
   // Ladekilder
   const shore = SK.get.shorepower(state);
@@ -500,8 +494,12 @@ function sourceRow(id, icon, name, desc) {
 function setSource(id, active) {
   const dot = document.getElementById(id + '-dot');
   const sts = document.getElementById(id + '-status');
+  const unknown = active == null;
   if (dot) dot.className = 'e-src-dot' + (active ? ' on' : '');
-  if (sts) { sts.textContent = active ? 'Aktiv' : 'Inaktiv'; sts.className = 'e-src-status ' + (active ? 'on' : 'off'); }
+  if (sts) {
+    sts.textContent = unknown ? 'Ukjent' : active ? 'Aktiv' : 'Inaktiv';
+    sts.className = 'e-src-status ' + (unknown ? 'unknown' : active ? 'on' : 'off');
+  }
 }
 
 function sc(id, label, val, unit, source, cls) {

@@ -173,7 +173,10 @@ export function onSkUpdate(state) {
   if (hrs != null) setRaw('hours', Math.round(hrs).toLocaleString('no'), 'timer', 'ok');
 
   const shore = SK.get.shorepower(state);
-  setRaw('shore', shore ? 'Tilkoblet' : 'Frakoblet', '', shore ? 'ok' : '');
+  setRaw('shore',
+    shore == null ? '—' : shore ? 'Tilkoblet' : 'Frakoblet',
+    shore == null ? 'ukjent' : '',
+    shore ? 'ok' : '');
 
   const wt = SK.get.waterTempC(state);
   setRaw('watertemp', wt != null ? wt + '°C' : '—', 'overflate', '');

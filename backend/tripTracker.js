@@ -102,10 +102,10 @@ async function poll() {
   const lon     = sk['navigation.position']?.longitude ?? null;
   const sogMs   = sk['navigation.speedOverGround'] ?? 0;
   const sogKn   = sogMs * 1.94384;
-  const rpm     = (sk['propulsion.0.revolutions'] ?? 0) * 60;
-  const engOn   = rpm > 100 || sk['propulsion.0.state'] === 'started';
+  const rpm     = (sk['propulsion.port.revolutions'] ?? 0) * 60;
+  const engOn   = rpm > 100 || sk['propulsion.port.state'] === 'started';
   const heading = (sk['navigation.headingTrue'] ?? 0) * 180 / Math.PI;
-  const runTime = sk['propulsion.0.runTime'] ?? null;
+  const runTime = sk['propulsion.port.runTime'] ?? null;
 
   switch (_state) {
 

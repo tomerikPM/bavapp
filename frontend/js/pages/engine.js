@@ -216,8 +216,8 @@ async function loadHelse() {
       return;
     }
 
-    const allCool = sessions.map(s=>s.stats['propulsion.0.coolantTemperature']?.avg).filter(Boolean);
-    const allOil  = sessions.map(s=>s.stats['propulsion.0.oilPressure']?.avg).filter(Boolean);
+    const allCool = sessions.map(s=>s.stats['propulsion.port.temperature']?.avg).filter(Boolean);
+    const allOil  = sessions.map(s=>s.stats['propulsion.port.oilPressure']?.avg).filter(Boolean);
     const totalHrs= sessions.reduce((s,t)=>s+(parseFloat(t.engine_hours)||0),0);
     const latest  = sessions[0];
 
@@ -229,21 +229,21 @@ async function loadHelse() {
     })() : '—';
 
     const PATHS_CONFIG = [
-      { path:'propulsion.0.coolantTemperature', label:'Kjølevann', unit:'°C', color:'#b01020' },
-      { path:'propulsion.0.oilPressure',        label:'Oljetrykk', unit:'bar', color:'#e65c00' },
-      { path:'propulsion.0.fuelRate',           label:'Forbruk',   unit:'L/h', color:'#b86000' },
-      { path:'propulsion.0.revolutions',        label:'RPM',       unit:'rpm', color:'#003b7e' },
+      { path:'propulsion.port.temperature', label:'Kjølevann', unit:'°C', color:'#b01020' },
+      { path:'propulsion.port.oilPressure',        label:'Oljetrykk', unit:'bar', color:'#e65c00' },
+      { path:'propulsion.port.fuel.rate',           label:'Forbruk',   unit:'L/h', color:'#b86000' },
+      { path:'propulsion.port.revolutions',        label:'RPM',       unit:'rpm', color:'#003b7e' },
     ];
 
     body.innerHTML = `
       <div class="eh-kpi-row">
         <div class="eh-kpi" style="--ek:#b01020">
           <div class="eh-kpi-l">Siste kjølevann</div>
-          <div class="eh-kpi-v">${latest.stats['propulsion.0.coolantTemperature']?.avg?.toFixed(1)||'—'} °C</div>
+          <div class="eh-kpi-v">${latest.stats['propulsion.port.temperature']?.avg?.toFixed(1)||'—'} °C</div>
         </div>
         <div class="eh-kpi" style="--ek:#e65c00">
           <div class="eh-kpi-l">Siste oljetrykk</div>
-          <div class="eh-kpi-v">${latest.stats['propulsion.0.oilPressure']?.avg?.toFixed(2)||'—'} bar</div>
+          <div class="eh-kpi-v">${latest.stats['propulsion.port.oilPressure']?.avg?.toFixed(2)||'—'} bar</div>
         </div>
         <div class="eh-kpi" style="--ek:#003b7e">
           <div class="eh-kpi-l">Loggede turer</div>
@@ -332,9 +332,9 @@ async function loadHelse() {
       const btn=document.getElementById('eh-ai-btn'), res2=document.getElementById('eh-ai-result');
       btn.textContent='⏳…'; btn.disabled=true; res2.style.display='block'; res2.textContent='…';
       const last5=sessions.slice(0,5).map(s=>{
-        const c=s.stats['propulsion.0.coolantTemperature'];
-        const o=s.stats['propulsion.0.oilPressure'];
-        const f=s.stats['propulsion.0.fuelRate'];
+        const c=s.stats['propulsion.port.temperature'];
+        const o=s.stats['propulsion.port.oilPressure'];
+        const f=s.stats['propulsion.port.fuel.rate'];
         return `${s.date}: kjølevann ${c?.avg?.toFixed(0)||'—'}°C (maks ${c?.max?.toFixed(0)||'—'}), olje ${o?.avg?.toFixed(2)||'—'} bar, forbruk ${f?.avg?.toFixed(1)||'—'} L/h`;
       }).join('\n');
       try {

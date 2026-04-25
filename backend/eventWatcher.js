@@ -110,13 +110,13 @@ async function poll() {
 // ── Sjekker ───────────────────────────────────────────────────────────────────
 
 function checkEngine(sk) {
-  const rpm      = (sk['propulsion.0.revolutions'] ?? 0) * 60;
-  const engineOn = rpm > 100 || sk['propulsion.0.state'] === 'started';
+  const rpm      = (sk['propulsion.port.revolutions'] ?? 0) * 60;
+  const engineOn = rpm > 100 || sk['propulsion.port.state'] === 'started';
   if (engineOn === _prev.engineOn) return;
   if (engineOn)
     fire('engine_start', 'engine', 'Motor startet', `RPM: ${Math.round(rpm)}`, 'info', 'engine');
   else {
-    const hrs = sk['propulsion.0.runTime'] ? Math.round(sk['propulsion.0.runTime'] / 3600).toLocaleString('no') : null;
+    const hrs = sk['propulsion.port.runTime'] ? Math.round(sk['propulsion.port.runTime'] / 3600).toLocaleString('no') : null;
     fire('engine_stop', 'engine', 'Motor stoppet', hrs ? `${hrs} gangtimer totalt` : 'RPM: 0', 'info', 'engine');
   }
   _prev.engineOn = engineOn;
@@ -133,10 +133,10 @@ function checkShorepower(sk) {
 }
 
 function checkBattery(sk) {
-  const socRaw = sk['electrical.batteries.0.capacity.stateOfCharge'] ?? null;
+  const socRaw = sk['electrical.batteries.279.capacity.stateOfCharge'] ?? null;
   if (socRaw == null) return;
   const soc     = Math.round(socRaw * 100);
-  const current = sk['electrical.batteries.0.current'] ?? null;
+  const current = sk['electrical.batteries.279.current'] ?? null;
   const newAlarm  = soc <= 20 ? 'low20' : soc <= 30 ? 'low30' : 'none';
   const prevAlarm = _prev.socAlarm;
   if (newAlarm !== prevAlarm) {
@@ -156,7 +156,7 @@ function checkBattery(sk) {
 
 function checkCoolant(sk) {
   const engineOn = (_prev.engineOn === true);
-  const coolantK = sk['propulsion.0.coolantTemperature'] ?? null;
+  const coolantK = sk['propulsion.port.temperature'] ?? null;
   const coolantC = coolantK != null ? coolantK - 273.15 : null;
   if (!engineOn) { _prev.coolantAlarm = 'ok'; return; }
   if (coolantC == null) return;
@@ -183,7 +183,7 @@ function checkBilge(sk) {
 }
 
 function checkDtcAlarms(sk) {
-  const alarms = sk['propulsion.0.alarms'];
+  const alarms = sk['propulsion.port.alarms'];
   if (!Array.isArray(alarms)) { _activeDtcCodes.clear(); return; }
 
   const currentCodes = new Set(alarms.map(a => a.code));
@@ -209,16 +209,16 @@ function checkDtcAlarms(sk) {
 // ── Baseline ──────────────────────────────────────────────────────────────────
 
 function initBaseline(sk) {
-  const rpm    = (sk['propulsion.0.revolutions'] ?? 0) * 60;
-  const socRaw = sk['electrical.batteries.0.capacity.stateOfCharge'] ?? null;
+  const rpm    = (sk['propulsion.port.revolutions'] ?? 0) * 60;
+  const socRaw = sk['electrical.batteries.279.capacity.stateOfCharge'] ?? null;
   const soc    = socRaw != null ? Math.round(socRaw * 100) : null;
-  _prev.engineOn     = rpm > 100 || sk['propulsion.0.state'] === 'started';
-  _prev.shorepower   = sk['electrical.ac.shore.available'] ?? false;
+  _prev.engineOn     = rpm > 100 || sk['propulsion.port.state'] === 'started';
+  _prev.shorepower   = sk['electrical.ac.shore.available'] ?? null;
   _prev.soc          = soc;
   _prev.socAlarm     = soc == null ? 'none' : soc <= 20 ? 'low20' : soc <= 30 ? 'low30' : 'none';
   _prev.coolantAlarm = 'ok';
   _prev.bilgeActive  = false;
-  const alarms = sk['propulsion.0.alarms'];
+  const alarms = sk['propulsion.port.alarms'];
   if (Array.isArray(alarms)) for (const a of alarms) _activeDtcCodes.add(a.code);
   console.log(`[eventWatcher] Baseline satt · motor=${_prev.engineOn} · shore=${_prev.shorepower} · soc=${soc ?? '?'}% · dtc=${_activeDtcCodes.size} aktive`);
 }

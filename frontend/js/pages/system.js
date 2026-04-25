@@ -90,8 +90,8 @@ function renderArch(panel) {
 
     <div class="arch-stack">
       ${archCard('📡','Signal K','Åpen maritim datastandard · JSON over HTTP/WS',
-        `<p>Signal K normaliserer data fra NMEA 0183, NMEA 2000 og proprietære protokoller til et felles JSON-skjema. Alle sensorverdier adresseres via dot-notation paths, f.eks. <code class="ac">electrical.batteries.0.capacity.stateOfCharge</code>.</p>`,
-        [['ok','Implementert'],['plan','Cerbo GX planlagt']])}
+        `<p>Signal K normaliserer data fra NMEA 0183, NMEA 2000 og proprietære protokoller til et felles JSON-skjema. Alle sensorverdier adresseres via dot-notation paths, f.eks. <code class="ac">electrical.batteries.279.capacity.stateOfCharge</code>.</p>`,
+        [['ok','Implementert'],['ok','Cerbo GX installert']])}
       ${archCard('🗄','Backend — Node.js + SQLite','Express REST API · lokal persistering',
         `<p>Persistenslag med tre oppgaver: tidsserielagring, domeneobjekter (hendelseslogg, vedlikehold, turer), og turdeteksjon — en tilstandsmaskin som poller Signal K og beregner distanse med Haversine.</p>`,
         [['ok','Implementert'],['','SQLite'],['','Express 4']])}

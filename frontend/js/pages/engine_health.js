@@ -17,10 +17,10 @@ async function ensureChartJS() {
 }
 
 const PATHS_CONFIG = [
-  { path: 'propulsion.0.coolantTemperature', label: 'Kjølevann', unit: '°C', color: '#b01020', normalMax: 90 },
-  { path: 'propulsion.0.oilPressure',        label: 'Oljetrykk', unit: 'bar', color: '#e65c00', normalMin: 2.0 },
-  { path: 'propulsion.0.fuelRate',           label: 'Forbruk',   unit: 'L/h', color: '#b86000', normalMax: 65 },
-  { path: 'propulsion.0.revolutions',        label: 'RPM',       unit: 'rpm', color: '#003b7e', normalMax: 3500 },
+  { path: 'propulsion.port.temperature', label: 'Kjølevann', unit: '°C', color: '#b01020', normalMax: 90 },
+  { path: 'propulsion.port.oilPressure',        label: 'Oljetrykk', unit: 'bar', color: '#e65c00', normalMin: 2.0 },
+  { path: 'propulsion.port.fuel.rate',           label: 'Forbruk',   unit: 'L/h', color: '#b86000', normalMax: 65 },
+  { path: 'propulsion.port.revolutions',        label: 'RPM',       unit: 'rpm', color: '#003b7e', normalMax: 3500 },
 ];
 
 export async function render(container) {
@@ -82,20 +82,20 @@ async function renderHealth(container, data) {
 
   // KPI-er fra siste sesjon
   const latest = sessions[0];
-  const allCool = sessions.map(s => s.stats['propulsion.0.coolantTemperature']?.avg).filter(Boolean);
-  const allOil  = sessions.map(s => s.stats['propulsion.0.oilPressure']?.avg).filter(Boolean);
+  const allCool = sessions.map(s => s.stats['propulsion.port.temperature']?.avg).filter(Boolean);
+  const allOil  = sessions.map(s => s.stats['propulsion.port.oilPressure']?.avg).filter(Boolean);
   const totalHrs = sessions.reduce((s,t) => s + (parseFloat(t.engine_hours)||0), 0);
 
   body.innerHTML = `
     <div class="eh-kpi-row">
       <div class="eh-kpi" style="--ek:#b01020">
         <div class="eh-kpi-l">Siste kjølevann snitt</div>
-        <div class="eh-kpi-v">${latest.stats['propulsion.0.coolantTemperature']?.avg?.toFixed(1) || '—'} °C</div>
-        <div class="eh-kpi-s">maks ${latest.stats['propulsion.0.coolantTemperature']?.max?.toFixed(0) || '—'}°C</div>
+        <div class="eh-kpi-v">${latest.stats['propulsion.port.temperature']?.avg?.toFixed(1) || '—'} °C</div>
+        <div class="eh-kpi-s">maks ${latest.stats['propulsion.port.temperature']?.max?.toFixed(0) || '—'}°C</div>
       </div>
       <div class="eh-kpi" style="--ek:#e65c00">
         <div class="eh-kpi-l">Siste oljetrykk snitt</div>
-        <div class="eh-kpi-v">${latest.stats['propulsion.0.oilPressure']?.avg?.toFixed(2) || '—'} bar</div>
+        <div class="eh-kpi-v">${latest.stats['propulsion.port.oilPressure']?.avg?.toFixed(2) || '—'} bar</div>
         <div class="eh-kpi-s">norm: 2.0–5.5 bar</div>
       </div>
       <div class="eh-kpi" style="--ek:#003b7e">
@@ -216,9 +216,9 @@ async function renderHealth(container, data) {
     result.style.display = 'block'; result.textContent = '…';
 
     const last5 = sessions.slice(0,5).map(s => {
-      const c = s.stats['propulsion.0.coolantTemperature'];
-      const o = s.stats['propulsion.0.oilPressure'];
-      const f = s.stats['propulsion.0.fuelRate'];
+      const c = s.stats['propulsion.port.temperature'];
+      const o = s.stats['propulsion.port.oilPressure'];
+      const f = s.stats['propulsion.port.fuel.rate'];
       return `${s.date}: kjølevann ${c?.avg?.toFixed(0)||'—'}°C (maks ${c?.max?.toFixed(0)||'—'}°C), oljetrykk ${o?.avg?.toFixed(2)||'—'} bar, forbruk ${f?.avg?.toFixed(1)||'—'} L/h`;
     }).join('\n');
 

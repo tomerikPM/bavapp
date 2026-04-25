@@ -26,14 +26,14 @@ router.get('/:id/stats', (req, res) => {
 
   // Aggreger maks/snitt per path
   const AGG_PATHS = [
-    'propulsion.0.revolutions',
-    'propulsion.0.coolantTemperature',
-    'propulsion.0.oilPressure',
-    'propulsion.0.oilTemperature',
-    'propulsion.0.engineLoad',
-    'propulsion.0.fuelRate',
-    'propulsion.0.boostPressure',
-    'electrical.batteries.0.capacity.stateOfCharge',
+    'propulsion.port.revolutions',
+    'propulsion.port.temperature',
+    'propulsion.port.oilPressure',
+    'propulsion.port.oilTemperature',
+    'propulsion.port.engineLoad',
+    'propulsion.port.fuel.rate',
+    'propulsion.port.boostPressure',
+    'electrical.batteries.279.capacity.stateOfCharge',
     'navigation.speedOverGround',
   ];
 
@@ -51,7 +51,7 @@ router.get('/:id/stats', (req, res) => {
   // Beregn totalt dieselforbruk ved trapesintegrasjon av fuelRate (m³/s → L)
   const fuelRows = db.prepare(
     `SELECT ts, value FROM sensor_history
-     WHERE path = 'propulsion.0.fuelRate' AND ts >= @from AND ts <= @to
+     WHERE path = 'propulsion.port.fuel.rate' AND ts >= @from AND ts <= @to
      ORDER BY ts`
   ).all({ from: trip.start_ts, to: end });
 
