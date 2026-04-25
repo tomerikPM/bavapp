@@ -29,7 +29,7 @@
 ### Elektrisk (installert)
 - **Husbank: 8× Makspower LiFePO4 100Ah 12V = 800Ah**, to bokser à 4 stk, mai 2020 av Bruenech AS
 - BMS innebygd 150A per celle, ladespenning 14,4 V
-- Monitorering: Victron SmartShunt 500A **og** BMV-712 Smart (begge VE.Direct)
+- Monitorering: Victron BMV-712 Smart (VE.Direct til Cerbo) med SmartShunt 500A som strømsensor. BMV-712 aux-input måler starter-spenning.
 - Ladere: Victron Blue Smart IP22 12/30 (Li-ION-modus) + Cristec (modell ikke bekreftet)
 - Ladeseparator Quick ECS1, fjernbryter Blue Sea ML-RBS 500A
 - 2900W pure sine inverter, 230V landstrøm med 3× B16 ABL Sursum
@@ -49,7 +49,7 @@
 - VE.Direct-port ttyS7: **BMV-712 Smart** → `electrical.batteries.279.*` (full datasett: SOC, voltage, current, power). `electrical.batteries.279-second.voltage` er BMV-712 aux-inngang (sannsynligvis starter-spenning).
 - N2K via YDEG-04N: starterbatteri-spenning → `electrical.batteries.0.voltage`
 - N2K via YDEG-04N: motor-data → `propulsion.port.*` (NB: ikke `propulsion.0.*`, og kjølevæsketemp er `temperature` ikke `coolantTemperature`; fuel rate er `fuel.rate` i m³/s)
-- **SmartShunt 500A: vises ikke på Cerbo** — sannsynlig kun Bluetooth-koblet eller VE.Direct-kabel ikke plugget i. Åpen tråd: avgjør om den skal kobles til Cerbo, eller om BMV-712 alene dekker behovet.
+- SmartShunt 500A er strømsensor for BMV-712 (ikke en selvstendig enhet på Cerbo). All husbank-data går gjennom BMV-712 til Cerbo.
 - Shore power: ingen direkte deteksjon. **Inferens i `signalk.js`**: husbank lader (>1A) + motor av (RPM <100) → landstrøm tilkoblet. Forutsetter ingen solar (stemmer for Summer). UI viser "ukjent" hvis ikke kan utledes.
 - Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
 
@@ -72,7 +72,6 @@
 
 1. **SSH på Cerbo** — port 22 closed selv på Unsecured-profil + root-passord (Venus OS v3.72). Trenger USB/SD-stick med setpasswd.txt-trick. Blokker for deploy av Bavapp på Cerbo.
 2. **Deploy Bavapp på Cerbo** — venter på SSH. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
-3. **SmartShunt 500A når ikke Cerbo** — sjekk fysisk VE.Direct-kabel. Hvis SmartShunt skal kobles på, finn ledig VE.Direct-port på Cerbo. BMV-712 er hovedmonitor i mellomtiden.
 4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
 5. **RUT200** — siste brikke for stabil ekstern tilgang før hotspot-avhengighet faller
 6. **Cloudflare Tunnel** — erstatt ngrok når RUT200 er på
