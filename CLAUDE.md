@@ -49,6 +49,9 @@
 - VE.Direct-port ttyS7: **BMV-712 Smart** → `electrical.batteries.279.*` (full datasett: SOC, voltage, current, power). `electrical.batteries.279-second.voltage` er BMV-712 aux-inngang (sannsynligvis starter-spenning).
 - N2K via YDEG-04N: starterbatteri-spenning → `electrical.batteries.0.voltage`
 - N2K via YDEG-04N: motor-data → `propulsion.port.*` (NB: ikke `propulsion.0.*`, og kjølevæsketemp er `temperature` ikke `coolantTemperature`; fuel rate er `fuel.rate` i m³/s)
+- N2K via YDEG-04N: dieseltank fra Wema-sender → `tanks.fuel.0.currentLevel`
+- N2K via ny plotter/svinger: dybde → `environment.depth.belowTransducer` (PGN 128267)
+- **YDEG-04N konfigurasjon ikke lett tilgjengelig** — fysisk plassering vanskeliggjør USB-tilkobling for å aktivere flere PGN-er (f.eks. sjøtemp via 130316). Hvis ny PGN trengs: vent til Volvo Penta NMEA 2000 Gateway (3838617) installeres parallelt, eller monter separat sensor.
 - SmartShunt 500A er strømsensor for BMV-712 (ikke en selvstendig enhet på Cerbo). All husbank-data går gjennom BMV-712 til Cerbo.
 - Shore power: ingen direkte deteksjon. **Inferens i `signalk.js`**: husbank lader (>1A) + motor av (RPM <100) → landstrøm tilkoblet. Forutsetter ingen solar (stemmer for Summer). UI viser "ukjent" hvis ikke kan utledes.
 - Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
