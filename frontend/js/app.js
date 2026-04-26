@@ -155,7 +155,7 @@ async function recordSensors() {
     { path: 'propulsion.port.alternatorVoltage',             unit: 'V' },
     { path: 'navigation.speedOverGround',                    unit: 'm/s' },
     { path: 'environment.water.temperature',                 unit: 'K' },
-    { path: 'environment.water.depth',                       unit: 'm' },
+    { path: 'environment.depth.belowTransducer',            unit: 'm' },
     { path: 'environment.wind.speedApparent',                unit: 'm/s' },
   ];
   const readings = PATHS

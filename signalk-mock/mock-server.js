@@ -309,7 +309,8 @@ function buildVesselTree() {
     },
     environment: {
     wind:  { speedApparent: { value: state.windSpeed }, angleApparent: { value: state.windDir * Math.PI / 180 } },
-    water: { temperature: { value: state.waterTemp }, depth: { value: state.waterDepth } },
+    water: { temperature: { value: state.waterTemp } },
+      depth: { belowTransducer: { value: state.waterDepth } },
       heating: { '0': {
           state:              { value: state.webastoState },
           setTemperature:     { value: state.webastoSetTemp + 273.15 },
@@ -392,7 +393,7 @@ function broadcastDelta() {
         { path: 'tanks.fuel.0.currentLevel',                     value: state.fuelLevel },
         { path: 'environment.wind.speedApparent',                value: state.windSpeed },
         { path: 'environment.water.temperature',                 value: state.waterTemp },
-        { path: 'environment.water.depth',                       value: state.waterDepth },
+        { path: 'environment.depth.belowTransducer',             value: state.waterDepth },
       ],
     }],
   };

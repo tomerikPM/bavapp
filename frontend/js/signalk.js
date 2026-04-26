@@ -175,6 +175,8 @@ export const get = {
   windSpeed:    (s = _state) => s['environment.wind.speedApparent']  ?? null,
   waterTempC:   (s = _state) => s['environment.water.temperature'] != null
                                   ? Math.round((s['environment.water.temperature'] - 273.15) * 10) / 10 : null,
-  waterDepth:   (s = _state) => s['environment.water.depth'] != null
-                                  ? Math.round(s['environment.water.depth'] * 10) / 10 : null,
+  waterDepth:   (s = _state) => {
+    const v = s['environment.depth.belowTransducer'] ?? s['environment.water.depth'];
+    return v != null ? Math.round(v * 10) / 10 : null;
+  },
 };
