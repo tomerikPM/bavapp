@@ -1,3 +1,71 @@
+# Deploy Bavapp
+
+To deploy-targets:
+- **Cerbo GX MK2 ombord** (primær — kjører lokalt på båtens Signal K)
+- **Railway** (sky-mirror for fjerntilgang)
+
+---
+
+# Deploy til Cerbo GX MK2
+
+Bavapp kjører som daemontools-tjeneste på Cerbo, snakker med Signal K på `localhost:3000`.
+
+## Forutsetninger
+
+- SSH-tilgang til Cerbo (root-passord satt via Superuser-trikset, se [victronenergy.com/live/ccgx:root_access](https://www.victronenergy.com/live/ccgx:root_access))
+- Cerbo på samme nett som Mac (typisk via iPhone-hotspot, IP `172.20.10.4`)
+- Venus OS Large image (har Node.js v20 + npm)
+
+## Første deploy
+
+```bash
+./sync-to-cerbo.sh
+```
+
+Skriptet:
+1. rsync av `backend/` + `frontend/` til `/data/bavapp/`
+2. `npm install --omit=dev` på Cerbo (henter prebuilt better-sqlite3 for armv7)
+3. Lager `/data/bavapp/service/{run,log/run}` (daemontools)
+4. Symlink `/service/bavapp → /data/bavapp/service` — svscan plukker opp innen 5 sek
+5. Restarter service via `svc -t` for å plukke opp ny kode
+
+## Seed data fra lokal Mac
+
+Etter første deploy er DB tom (rsync ekskluderer `data/` og `uploads/`). Importer costs + documents + photos + uploads-filer:
+
+```bash
+./wipe-and-seed-cerbo.sh
+```
+
+Skriptet eksporterer fra lokal Mac-DB, sletter Cerbo-DB, lar service auto-seed strukturelle tabeller (parts, maintenance, vessel_items, features, changelog), og importerer tre user-data-tabeller via `better-sqlite3` (Cerbo har ikke `sqlite3` CLI).
+
+## Drift på Cerbo
+
+```bash
+# Status
+ssh root@172.20.10.4 svstat /service/bavapp
+
+# Logger (live)
+ssh root@172.20.10.4 tail -f /var/log/bavapp/current
+
+# Restart
+ssh root@172.20.10.4 svc -t /service/bavapp
+
+# Stopp / start
+ssh root@172.20.10.4 svc -d /service/bavapp
+ssh root@172.20.10.4 svc -u /service/bavapp
+```
+
+Bavapp kjøres på `http://172.20.10.4:3001/` på boat-LAN.
+
+## Override host
+
+```bash
+CERBO_HOST=root@10.0.0.50 ./sync-to-cerbo.sh
+```
+
+---
+
 # Deploy Bavapp til Railway
 
 ## Før deploy
