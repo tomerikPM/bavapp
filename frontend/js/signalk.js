@@ -149,10 +149,18 @@ export const get = {
   shorepower:   (s = _state) => {
     const explicit = s['electrical.ac.shore.available'];
     if (explicit != null) return explicit;
-    // Cerbo har ingen shore-detect; utled: lading med motor av = landstrøm (ingen solar)
-    const cur = s['electrical.batteries.279.current'];
-    const rpm = (s['propulsion.port.revolutions'] ?? 0) * 60;
-    if (cur != null && cur > 1 && rpm < 100) return true;
+    // Cerbo har ingen shore-detect; utled fra LiFePO4-signatur (motor av, ingen solar):
+    //   cur > 0.5A      → aktiv lading (bulk/absorption) → shore on
+    //   volt > 13.4V    → float-modus, LiFePO4 holder ikke selv så høyt → shore on
+    //   cur < -1A       → tydelig forbruk → shore off
+    //   ellers          → ukjent (kan være rett etter frakobling)
+    const cur  = s['electrical.batteries.279.current'];
+    const volt = s['electrical.batteries.279.voltage'];
+    const rpm  = (s['propulsion.port.revolutions'] ?? 0) * 60;
+    if (rpm >= 100) return null; // motor i gang → alternator kan også lade
+    if (cur != null && cur > 0.5) return true;
+    if (volt != null && volt > 13.4 && (cur == null || cur > -2)) return true;
+    if (cur != null && cur < -1) return false;
     return null;
   },
   inverter:     (s = _state) => s['electrical.inverter.0.state'] === 'on',
