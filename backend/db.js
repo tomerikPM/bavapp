@@ -122,6 +122,16 @@ db.exec(`
     unit      TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS diag_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL,
+    tag       TEXT NOT NULL,
+    message   TEXT NOT NULL,
+    context   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_diag_events_ts  ON diag_events(ts);
+  CREATE INDEX IF NOT EXISTS idx_diag_events_tag ON diag_events(tag);
+
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     id          TEXT PRIMARY KEY,
     endpoint    TEXT NOT NULL UNIQUE,

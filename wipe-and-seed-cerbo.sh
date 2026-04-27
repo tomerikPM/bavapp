@@ -13,7 +13,7 @@
 
 set -e
 
-CERBO_HOST="${CERBO_HOST:-root@172.20.10.4}"
+CERBO_HOST="${CERBO_HOST:-root@192.168.1.237}"
 LOCAL_DB="${LOCAL_DB:-backend/data/bavaria32.db}"
 LOCAL_UPLOADS="${LOCAL_UPLOADS:-backend/uploads}"
 TMP_SQL="/tmp/bavapp-seed-$$.sql"

@@ -13,7 +13,7 @@ Bavapp kjører som daemontools-tjeneste på Cerbo, snakker med Signal K på `loc
 ## Forutsetninger
 
 - SSH-tilgang til Cerbo (root-passord satt via Superuser-trikset, se [victronenergy.com/live/ccgx:root_access](https://www.victronenergy.com/live/ccgx:root_access))
-- Cerbo på samme nett som Mac (typisk via iPhone-hotspot, IP `172.20.10.4`)
+- Cerbo på samme nett som Mac (via RUT200 wifi "Summer", IP `192.168.1.237`)
 - Venus OS Large image (har Node.js v20 + npm)
 
 ## Første deploy
@@ -43,20 +43,20 @@ Skriptet eksporterer fra lokal Mac-DB, sletter Cerbo-DB, lar service auto-seed s
 
 ```bash
 # Status
-ssh root@172.20.10.4 svstat /service/bavapp
+ssh root@192.168.1.237 svstat /service/bavapp
 
 # Logger (live)
-ssh root@172.20.10.4 tail -f /var/log/bavapp/current
+ssh root@192.168.1.237 tail -f /var/log/bavapp/current
 
 # Restart
-ssh root@172.20.10.4 svc -t /service/bavapp
+ssh root@192.168.1.237 svc -t /service/bavapp
 
 # Stopp / start
-ssh root@172.20.10.4 svc -d /service/bavapp
-ssh root@172.20.10.4 svc -u /service/bavapp
+ssh root@192.168.1.237 svc -d /service/bavapp
+ssh root@192.168.1.237 svc -u /service/bavapp
 ```
 
-Bavapp kjøres på `http://172.20.10.4:3001/` på boat-LAN.
+Bavapp kjøres på `http://192.168.1.237:3001/` på boat-LAN (RUT200 wifi "Summer").
 
 ## Override host
 

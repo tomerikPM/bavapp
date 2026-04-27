@@ -12,7 +12,7 @@
 
 set -e
 
-CERBO_HOST="${CERBO_HOST:-root@172.20.10.4}"
+CERBO_HOST="${CERBO_HOST:-root@192.168.1.237}"
 APP_DIR="/data/bavapp"
 
 cd "$(dirname "$0")"
@@ -47,6 +47,11 @@ cat > /data/bavapp/service/run <<'RUN'
 #!/bin/sh
 exec 2>&1
 cd /data/bavapp/backend
+# Source .env for secrets (ROUTER_PASS, VAPID_*, etc.)
+set -a
+[ -f .env ] && . ./.env
+set +a
+# Produksjonsverdier overstyrer evt. dev-verdier fra .env
 exec env \
   PORT=3001 \
   SIGNALK_URL=http://localhost:3000 \
@@ -83,5 +88,5 @@ ssh "$CERBO_HOST" "
 
 echo ""
 echo "✓ Deploy ferdig."
-echo "  http://172.20.10.4:3001 (Bavapp)"
+echo "  http://192.168.1.237:3001 (Bavapp)"
 echo "  Logger: ssh $CERBO_HOST tail -f /var/log/bavapp/current"

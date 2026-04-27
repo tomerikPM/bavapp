@@ -21,6 +21,8 @@ const PAGES = {
   vessel:        () => import('./pages/vessel.js?v=9'),
   system:        () => import('./pages/system.js'),
   cameras:       () => import('./pages/cameras.js'),
+  fuel_efficiency: () => import('./pages/fuel_efficiency.js'),
+  sauna:         () => import('./pages/sauna.js'),
 };
 
 const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine', 'map'];
@@ -32,11 +34,19 @@ const _cache = {};
 // Auto-detect backend_url: lokalt → localhost:3001, deployed → samme origin.
 // Unngår at alle 20 filer må oppdateres med fallback-logikk.
 function bootstrapBackendUrl() {
-  if (localStorage.getItem('backend_url')) return;  // respekter brukerens egen konfig
+  const stored   = localStorage.getItem('backend_url');
   const { hostname, origin } = window.location;
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
-               || /^(192\.168|10\.|169\.254|172\.(1[6-9]|2\d|3[01]))\./.test(hostname);
-  localStorage.setItem('backend_url', isLocal ? 'http://localhost:3001' : origin);
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  // Lagret localhost-URL mens vi kjører fra en annen host (f.eks. Cerbo) → utdatert, nullstill
+  if (stored && /localhost|127\.0\.0\.1/.test(stored) && !isLoopback) {
+    localStorage.removeItem('backend_url');
+  } else if (stored) {
+    return;  // respekter brukerens egen konfig
+  }
+
+  // localhost/127.0.0.1 → dev-backend; alt annet (inkl. Cerbo 192.168.x.x) → same origin
+  localStorage.setItem('backend_url', isLoopback ? 'http://localhost:3001' : origin);
 }
 
 export async function init() {

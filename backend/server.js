@@ -88,9 +88,11 @@ app.use('/api/parts',       require('./routes/parts'));
 app.use('/api/maintenance', require('./routes/maintenance'));
 app.use('/api/trips',       require('./routes/trips'));
 app.use('/api/sensors',     require('./routes/sensors'));
+app.use('/api/diag',        require('./routes/diag'));
 app.use('/api/push',        require('./routes/push'));
 app.use('/api/costs',       require('./routes/costs'));
 app.use('/api/anomaly',     require('./routes/anomaly'));
+app.use('/api/efficiency',  require('./routes/efficiency'));
 app.use('/api/webasto',     require('./routes/webasto'));
 app.use('/api/changelog',   require('./routes/changelog'));
 app.use('/api/navigate',    require('./routes/navigate'));
@@ -104,9 +106,11 @@ app.use('/api/admin',        require('./routes/admin'));
 app.use('/api/photos',       require('./routes/photos'));
 app.use('/api/image',        require('./routes/image'));
 app.use('/api/vessel',       require('./routes/vessel'));
+app.use('/api/sauna',        require('./routes/sauna'));
 
 const tracker = require('./tripTracker');
 const watcher = require('./eventWatcher');
+const poller  = require('./sensorPoller');
 
 app.get('/api/trips/active', (req, res) => {
   const info = tracker.getActiveTripInfo();
@@ -136,5 +140,6 @@ app.listen(PORT, () => {
   console.log(`   Signal K: ${SK_URL}\n`);
   tracker.start(SK_URL);
   watcher.start(SK_URL);
+  poller.start(SK_URL);
   fuelRoute.startScheduler();
 });

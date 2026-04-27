@@ -40,11 +40,13 @@
   <button class="nb" data-page="dashboard">    <span class="ni">◼</span>Hjem</button>
   <button class="nb" data-page="electrical">   <span class="ni">⚡</span>Strøm</button>
   <button class="nb" data-page="tanks">        <span class="ni">🛢</span>Tanker</button>
-  <button class="nb" data-page="engine">       <span class="ni">⚙</span>Motor</button>
-  <button class="nb" data-page="webasto">      <span class="ni">🔥</span>Webasto</button>
+  <button class="nb" data-page="engine">          <span class="ni">⚙</span>Motor</button>
+  <button class="nb" data-page="fuel_efficiency"><span class="ni">⛽</span>Effektiv.</button>
+  <button class="nb" data-page="webasto">         <span class="ni">🔥</span>Webasto</button>
   <button class="nb" data-page="weather">      <span class="ni">⛅</span>Vær</button>
   <button class="nb" data-page="map">          <span class="ni">◎</span>Kart</button>
   <button class="nb" data-page="cameras">      <span class="ni">📹</span>Kamera</button>
+  <button class="nb" data-page="sauna">        <span class="ni">🧖</span>Badstu</button>
   <button class="nb" data-page="events">       <span class="ni">◷</span>Logg</button>
   <button class="nb" data-page="charts">       <span class="ni">◈</span>Grafer</button>
   <button class="nb" data-page="trips">        <span class="ni">⚓</span>Turer</button>
@@ -75,7 +77,9 @@
   <div id="page-assistant"  class="page"></div>
   <div id="page-vessel"      class="page"></div>
   <div id="page-system"      class="page"></div>
-  <div id="page-cameras"     class="page"></div>
+  <div id="page-cameras"          class="page"></div>
+  <div id="page-fuel_efficiency"  class="page"></div>
+  <div id="page-sauna"            class="page"></div>
 </main>
 
 <!-- MODUSVELGER -->
@@ -126,6 +130,8 @@
     <div class="set-group"><div class="set-gt">Backend</div>
       <div class="set-field"><label>Backend URL</label>
         <input class="set-inp" id="cfg-backend" type="text" placeholder="http://localhost:3001">
+        <div class="set-hint" id="cfg-backend-hint"></div>
+        <button class="set-reset" id="cfg-backend-reset">↺ Auto-detekter</button>
       </div>
     </div>
     <div class="set-group"><div class="set-gt">Claude AI</div>
@@ -215,6 +221,15 @@
   document.getElementById('cfg-signalk').value=localStorage.getItem('signalk_url')||'http://localhost:3000';
   document.getElementById('cfg-backend').value =localStorage.getItem('backend_url')||'http://localhost:3001';
   document.getElementById('cfg-apikey').value  =localStorage.getItem('api_key')    ||'';
+
+  const backendHint = document.getElementById('cfg-backend-hint');
+  if (backendHint) backendHint.textContent = 'Nåværende: ' + (localStorage.getItem('backend_url') || 'ikke satt');
+
+  document.getElementById('cfg-backend-reset')?.addEventListener('click', () => {
+    localStorage.removeItem('backend_url');
+    toast('Backend URL nullstilt — laster om…', 'ok');
+    setTimeout(() => location.reload(), 800);
+  });
   document.getElementById('cfg-lat').value     =localStorage.getItem('wx_lat')     ||'58.15';
   document.getElementById('cfg-lon').value     =localStorage.getItem('wx_lon')     ||'7.99';
 
