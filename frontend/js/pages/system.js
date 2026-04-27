@@ -18,11 +18,13 @@ export async function render(container) {
       <button class="sys-tab sys-tab-active" data-tab="arch"      role="tab">Arkitektur</button>
       <button class="sys-tab"                data-tab="changelog" role="tab">Endringslogg</button>
       <button class="sys-tab"                data-tab="features"  role="tab">Features</button>
-      <button class="sys-tab"                data-tab="router"    role="tab">Ruter</button>
+      <button class="sys-tab"                data-tab="status"    role="tab">Status</button>
+      <button class="sys-tab"                data-tab="router"    role="tab">Konnektivitet</button>
     </div>
     <div id="sys-panel-arch"      class="sys-panel sys-panel-active"></div>
     <div id="sys-panel-changelog" class="sys-panel" hidden></div>
     <div id="sys-panel-features"  class="sys-panel" hidden></div>
+    <div id="sys-panel-status"    class="sys-panel" hidden></div>
     <div id="sys-panel-router"    class="sys-panel" hidden></div>
 
     ${styles()}
@@ -30,12 +32,12 @@ export async function render(container) {
 
   renderArch(document.getElementById('sys-panel-arch'));
 
-  const loaded = { changelog: false, features: false, router: false };
+  const loaded = { changelog: false, features: false, status: false, router: false };
   container.querySelectorAll('.sys-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       container.querySelectorAll('.sys-tab').forEach(b => b.classList.toggle('sys-tab-active', b === btn));
-      for (const t of ['arch', 'changelog', 'features', 'router']) {
+      for (const t of ['arch', 'changelog', 'features', 'status', 'router']) {
         const el = document.getElementById('sys-panel-' + t);
         el.hidden = t !== tab;
         el.classList.toggle('sys-panel-active', t === tab);
@@ -48,12 +50,16 @@ export async function render(container) {
         loaded.features = true;
         renderFeaturesTab(document.getElementById('sys-panel-features'));
       }
+      if (tab === 'status' && !loaded.status) {
+        loaded.status = true;
+        renderStatusTab(document.getElementById('sys-panel-status'));
+      }
       if (tab === 'router' && !loaded.router) {
         loaded.router = true;
         renderRouterTab(document.getElementById('sys-panel-router'));
       }
-      if (tab === 'router') startRouterPolling();
-      else                  stopRouterPolling();
+      if (tab === 'router') startRouterPolling(); else stopRouterPolling();
+      if (tab === 'status') startStatusPolling(); else stopStatusPolling();
     });
   });
 }
@@ -548,6 +554,102 @@ function escapeHtml(s) {
 function escapeAttr(s) { return escapeHtml(s); }
 
 // ══════════════════════════════════════════════════════════════════════
+// STATUS-TAB (Cerbo-systeminformasjon)
+// ══════════════════════════════════════════════════════════════════════
+let _statusPollTimer = null;
+
+function renderStatusTab(panel) {
+  panel.innerHTML = `
+    <div class="rt-controls">
+      <button class="btn-secondary" id="st-refresh" style="font-size:11px;padding:7px 14px">↻ Oppdater</button>
+      <label class="cl-toggle"><input type="checkbox" id="st-autorefresh" checked> Auto-oppdater (30 s)</label>
+    </div>
+    <div id="st-body"><div class="wx-load"><div class="spin"></div>Henter systemstatus…</div></div>
+  `;
+  document.getElementById('st-refresh').addEventListener('click', loadSysInfo);
+  document.getElementById('st-autorefresh').addEventListener('change', e => {
+    if (e.target.checked) startStatusPolling();
+    else                  stopStatusPolling();
+  });
+  loadSysInfo();
+  startStatusPolling();
+}
+
+async function loadSysInfo() {
+  const body = document.getElementById('st-body');
+  if (!body) return;
+  try {
+    const d = await fetch(`${BASE()}/api/diag/sysinfo`).then(r => r.json());
+    body.innerHTML = renderSysInfoBody(d);
+  } catch (e) {
+    body.innerHTML = `<div style="padding:20px;color:var(--danger);font-size:12px">Feil: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderSysInfoBody(d) {
+  const { system, bavapp, signalK, ts } = d;
+  const l = system.loadavg;
+  const memPct = Math.round((1 - system.mem.free / system.mem.total) * 100);
+
+  const loadCls = v => v > 2 ? 'danger' : v > 1 ? 'warn' : null;
+  const memCls  = memPct > 85 ? 'danger' : memPct > 70 ? 'warn' : null;
+
+  return `
+    <div class="st-cards">
+      <div class="st-card">
+        <div class="st-card-lbl">System oppe i</div>
+        <div class="st-card-val">${fmtUptime(system.uptime)}</div>
+        <div class="st-card-sub">${escapeHtml(system.hostname)}</div>
+      </div>
+      <div class="st-card">
+        <div class="st-card-lbl">Bavapp oppe i</div>
+        <div class="st-card-val">${fmtUptime(bavapp.uptime)}</div>
+        <div class="st-card-sub">${escapeHtml(bavapp.nodeVersion)}</div>
+      </div>
+      <div class="st-card st-card-sk st-card-sk-${signalK.ok ? 'ok' : 'err'}">
+        <div class="st-card-lbl">Signal K</div>
+        <div class="st-card-val">${signalK.ok ? 'Tilkoblet' : 'Nede'}</div>
+        <div class="st-card-sub">${signalK.latencyMs != null ? signalK.latencyMs + ' ms' : '—'}</div>
+      </div>
+    </div>
+
+    <div class="cl-version-header" style="margin-top:20px">CPU</div>
+    <div class="st-metric-row">
+      ${stStat('1 min',  l[0].toFixed(2), loadCls(l[0]))}
+      ${stStat('5 min',  l[1].toFixed(2), loadCls(l[1]))}
+      ${stStat('15 min', l[2].toFixed(2), loadCls(l[2]))}
+    </div>
+
+    <div class="cl-version-header" style="margin-top:16px">Minne</div>
+    <div class="st-metric-row">
+      ${stStat('Brukt',  memPct + '%',               memCls)}
+      ${stStat('Ledig',  fmtBytes(system.mem.free),  null)}
+      ${stStat('Total',  fmtBytes(system.mem.total), null)}
+    </div>
+
+    <div class="rt-meta" style="margin-top:16px">Sist oppdatert ${new Date(ts).toLocaleTimeString('no')}</div>
+  `;
+}
+
+function stStat(lbl, val, cls) {
+  return `<div class="rt-stat">
+    <div class="rt-stat-lbl">${escapeHtml(lbl)}</div>
+    <div class="rt-stat-val${cls ? ' st-' + cls : ''}">${escapeHtml(String(val))}</div>
+  </div>`;
+}
+
+function startStatusPolling() {
+  stopStatusPolling();
+  const cb = document.getElementById('st-autorefresh');
+  if (cb && !cb.checked) return;
+  _statusPollTimer = setInterval(() => loadSysInfo(), 30_000);
+}
+
+function stopStatusPolling() {
+  if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // RUTER-TAB (Teltonika RUT200)
 // ══════════════════════════════════════════════════════════════════════
 let _routerPollTimer = null;
@@ -600,20 +702,25 @@ async function loadRouterStatus() {
   const body = document.getElementById('rt-body');
   if (!body) return;
   try {
-    const [status, cfg] = await Promise.all([
+    const [status, cfg, traffic] = await Promise.all([
       fetch(`${BASE()}/api/router/status`).then(r => r.json()),
       fetch(`${BASE()}/api/router/config`).then(r => r.json()),
+      fetch(`${BASE()}/api/router/traffic`).then(r => r.json()).catch(() => null),
     ]);
     _routerReachable = !!status.reachable;
-    body.innerHTML = renderRouterBody(status, cfg);
+    body.innerHTML = renderRouterBody(status, cfg, traffic);
 
-    if (_routerReachable) loadWifiClients();
+    if (_routerReachable) {
+      loadWifiClients();
+      loadSmsInbox();
+      document.getElementById('rt-debug-btn')?.addEventListener('click', loadRouterDebug);
+    }
   } catch (e) {
     body.innerHTML = `<div class="empty" style="padding:20px;color:var(--danger);font-size:12px">Feil: ${escapeHtml(e.message)}</div>`;
   }
 }
 
-function renderRouterBody(status, cfg) {
+function renderRouterBody(status, cfg, traffic) {
   if (!status.reachable) {
     return `
       <div class="rt-offline">
@@ -626,7 +733,7 @@ function renderRouterBody(status, cfg) {
             <li>Koble RUT200 til strøm (9-30 V DC) og nettverk</li>
             <li>Sett <code>ROUTER_PASS=&lt;passord&gt;</code> i <code>backend/.env</code></li>
             <li>Sett evt. <code>ROUTER_IP</code> (standard: <code>192.168.1.1</code>) og <code>ROUTER_TLS=1</code> hvis HTTPS</li>
-            <li>Restart backend</li>
+            <li>Synk og restart backend: <code>./sync-to-cerbo.sh</code></li>
           </ol>
         </div>
         <div class="rt-offline-cfg">
@@ -639,46 +746,169 @@ function renderRouterBody(status, cfg) {
     `;
   }
 
-  const m = status.mobile || {};
-  const w = status.wan    || {};
-  const signalCls = signalClass(m.signal);
+  const m = status.mobile;
+  const w = status.wan || {};
+  const src = status.wanSource || 'none';
 
-  return `
-    <div class="rt-hero rt-hero-${signalCls}">
+  // WAN-kilde — etikett, ikon og klasse
+  const wanLabel = {
+    cellular: 'SIM / Mobil',
+    wifi:     'WiFi-hotspot',
+    wan:      'Kablet WAN',
+    none:     'Ingen tilkobling',
+    unknown:  'Ukjent kilde',
+  }[src] ?? src;
+  const wanIcon = { cellular: '📶', wifi: '📡', wan: '🔌', none: '✗', unknown: '?' }[src] ?? '?';
+  const wanCls  = w.up ? (src === 'cellular' ? 'excellent'
+                       : src === 'wifi'      ? 'good'
+                       : src === 'wan'       ? 'good'
+                                              : 'fair')
+                       : 'offline';
+
+  const trafficHtml = (traffic && !traffic.error && (traffic.rx_bytes != null || traffic.tx_bytes != null)) ? `
+    <div class="cl-version-header" style="margin-top:20px">Databruk (siden siste reset)</div>
+    <div class="rt-traffic-grid">
+      <div class="rt-traffic-cell">
+        <div class="rt-traffic-lbl">↓ Mottatt</div>
+        <div class="rt-traffic-val">${fmtBytes(traffic.rx_bytes)}</div>
+        ${traffic.rx_packets != null ? `<div class="rt-traffic-sub">${traffic.rx_packets.toLocaleString('no')} pakker</div>` : ''}
+      </div>
+      <div class="rt-traffic-cell">
+        <div class="rt-traffic-lbl">↑ Sendt</div>
+        <div class="rt-traffic-val">${fmtBytes(traffic.tx_bytes)}</div>
+        ${traffic.tx_packets != null ? `<div class="rt-traffic-sub">${traffic.tx_packets.toLocaleString('no')} pakker</div>` : ''}
+      </div>
+    </div>
+  ` : '';
+
+  // Cellulær-seksjon — bare hvis SIM og data finnes
+  const cellularHtml = m ? `
+    <div class="cl-version-header" style="margin-top:20px">Mobilsignal</div>
+    <div class="rt-hero rt-hero-${signalClass(m.signal)}" style="margin-bottom:10px">
       <div class="rt-hero-row">
         <div class="rt-hero-cell">
-          <div class="rt-hero-lbl">Signal</div>
+          <div class="rt-hero-lbl">RSSI</div>
           <div class="rt-hero-val">${fmtSignal(m.signal)}</div>
           <div class="rt-hero-sub">${signalBars(m.signal)}</div>
         </div>
         <div class="rt-hero-cell">
           <div class="rt-hero-lbl">Nettverk</div>
           <div class="rt-hero-val">${escapeHtml(m.networkType || '—')}</div>
-          <div class="rt-hero-sub">${escapeHtml(m.operator || 'Ukjent operatør')}</div>
+          <div class="rt-hero-sub">${escapeHtml(m.operator || '—')}</div>
         </div>
         <div class="rt-hero-cell">
-          <div class="rt-hero-lbl">WAN</div>
-          <div class="rt-hero-val">${escapeHtml(w.proto || '—')}${w.up ? ' ✓' : ''}</div>
-          <div class="rt-hero-sub">${escapeHtml(w.ipv4 || 'Ingen IP')}</div>
+          <div class="rt-hero-lbl">Band / Cell</div>
+          <div class="rt-hero-val">${escapeHtml(m.band || '—')}</div>
+          <div class="rt-hero-sub">${m.cellId ? 'Cell ' + escapeHtml(String(m.cellId)) : '—'}</div>
         </div>
       </div>
     </div>
+    <div class="st-metric-row" style="grid-template-columns:repeat(3,1fr)">
+      ${rtStat('SINR', fmtOrDash(m.sinr, ' dB'))}
+      ${rtStat('RSRP', fmtOrDash(m.rsrp, ' dBm'))}
+      ${rtStat('RSRQ', fmtOrDash(m.rsrq, ' dB'))}
+    </div>
+  ` : '';
 
-    <div class="rt-grid">
-      ${rtStat('RSSI',        fmtDbm(m.signal))}
-      ${rtStat('SINR',        fmtOrDash(m.sinr,  ' dB'))}
-      ${rtStat('RSRP',        fmtOrDash(m.rsrp,  ' dBm'))}
-      ${rtStat('RSRQ',        fmtOrDash(m.rsrq,  ' dB'))}
-      ${rtStat('Band',        m.band || '—')}
-      ${rtStat('Cell ID',     m.cellId || '—')}
-      ${rtStat('WAN uptime',  fmtUptime(w.uptime))}
+  // Andre kolonne avhenger av WAN-kilde
+  const col2 = (() => {
+    if (src === 'wifi' && w.ssid) {
+      return {
+        lbl: 'Hotspot (SSID)',
+        val: w.ssid,
+        sub: [w.signal != null ? `${w.signal} dBm` : null,
+              w.bitrate ? `${Math.round(w.bitrate / 1000)} Mbit/s` : null,
+              w.encryption || null].filter(Boolean).join(' · ') || '—',
+      };
+    }
+    if (src === 'cellular') {
+      return {
+        lbl: 'Operatør',
+        val: m?.operator || '—',
+        sub: m?.networkType || w.proto || '—',
+      };
+    }
+    return {
+      lbl: 'Protokoll / interface',
+      val: w.proto || '—',
+      sub: w.ifname ? `${w.ifname}${w.device ? ' (' + w.device + ')' : ''}` : '—',
+    };
+  })();
+
+  // Alternative WAN-kilder (vises hvis det finnes flere kandidater)
+  const alts = (status.wanCandidates || []).filter(c => c.ifname !== w.ifname);
+  const altsHtml = alts.length ? `
+    <div class="rt-meta" style="margin-top:-8px;margin-bottom:14px;text-align:left;font-style:normal">
+      Andre tilgjengelige kilder:
+      ${alts.map(a => `<code style="margin-left:6px">${escapeHtml(a.source)} via ${escapeHtml(a.ifname)}${a.ipv4 ? ' (' + escapeHtml(a.ipv4) + ')' : ''}</code>`).join(' ')}
+    </div>
+  ` : '';
+
+  // Diagnostikk hvis ingen WAN ble funnet (hjelper å skille "ingen nett" fra "klarte ikke å lese")
+  const diag = status._diag || {};
+  const noWanDiagHtml = src === 'none' ? `
+    <div class="rt-nodata" style="margin-bottom:14px;flex-direction:column;align-items:flex-start;gap:6px">
+      <div>
+        <strong>Ingen WAN-kilde detektert.</strong>
+        ${diag.dumpFallback ? '<code>network.interface.dump</code> feilet — brukte fallback med faste navn. ' : ''}
+        ${diag.ifaceCount === 0 ? 'Ingen interfaces returnert fra ruteren.' : `Så ${diag.ifaceCount} interface(s), men ingen oppfylte WAN-kriteriene (oppe + IPv4 eller default-rute).`}
+      </div>
+      ${Array.isArray(diag.seenInterfaces) && diag.seenInterfaces.length ? `
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--ink-medium)">
+          ${diag.seenInterfaces.map(i => `${i.name} (${i.up ? 'opp' : 'ned'}, ${i.proto || '?'}, ${i.hasIp4 ? 'IPv4' : 'no-ip'})`).join(' · ')}
+        </div>
+      ` : ''}
+      <button class="rt-debug-btn" id="rt-debug-btn">Vis full ubus-diagnose</button>
+      <div id="rt-debug-out" style="width:100%"></div>
+    </div>
+  ` : '';
+
+  return `
+    <div class="cl-version-header">Internett-tilkobling</div>
+    <div class="rt-hero rt-hero-${wanCls}">
+      <div class="rt-hero-row">
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">Kilde</div>
+          <div class="rt-hero-val" style="font-size:1.5rem">${wanIcon}</div>
+          <div class="rt-hero-sub"><strong>${escapeHtml(wanLabel)}</strong></div>
+        </div>
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">${escapeHtml(col2.lbl)}</div>
+          <div class="rt-hero-val" style="font-size:1rem">${escapeHtml(col2.val)}</div>
+          <div class="rt-hero-sub">${escapeHtml(col2.sub)}</div>
+        </div>
+        <div class="rt-hero-cell">
+          <div class="rt-hero-lbl">IP-adresse</div>
+          <div class="rt-hero-val" style="font-size:1rem;font-family:'DM Mono',monospace">${escapeHtml(w.ipv4 || '—')}</div>
+          <div class="rt-hero-sub">${w.uptime != null ? 'oppe ' + fmtUptime(w.uptime) : (w.up ? 'oppe' : 'nede')}</div>
+        </div>
+      </div>
+    </div>
+    ${altsHtml}
+    ${noWanDiagHtml}
+
+    ${cellularHtml}
+    ${!status.hasSim ? `
+      <div class="cl-version-header" style="margin-top:20px">Mobilsignal</div>
+      <div class="rt-clients-empty">Ingen SIM-kort installert i ruteren.</div>
+    ` : ''}
+
+    <div class="cl-version-header" style="margin-top:20px">Ruter</div>
+    <div class="st-metric-row">
       ${rtStat('Sys. uptime', fmtUptime(status.uptime))}
       ${rtStat('WiFi-klienter', status.wifiClients ?? '—')}
+      ${rtStat('SIM', status.hasSim ? 'Installert' : 'Ikke installert')}
     </div>
 
-    <div id="rt-clients-wrap" style="margin-top:16px"></div>
+    ${trafficHtml}
 
-    <div class="rt-meta">Sist oppdatert ${new Date(status.ts).toLocaleTimeString('no')} · Konfig: ${escapeHtml(cfg.ip)}${cfg.tls ? ' (TLS)' : ''}</div>
+    <div id="rt-clients-wrap" style="margin-top:20px"></div>
+    ${!status.hasSim ? `
+      <div class="cl-version-header" style="margin-top:20px">SMS-innboks</div>
+      <div class="rt-clients-empty">Ingen SIM-kort installert.</div>
+    ` : '<div id="rt-sms-inbox-wrap" style="margin-top:20px"></div>'}
+
+    <div class="rt-meta" style="margin-top:12px">Sist oppdatert ${new Date(status.ts).toLocaleTimeString('no')} · ${escapeHtml(cfg.ip)}${cfg.tls ? ' TLS' : ''}</div>
   `;
 }
 
@@ -723,24 +953,109 @@ async function loadWifiClients() {
     const r = await fetch(`${BASE()}/api/router/wifi-clients`);
     if (!r.ok) return;
     const { clients } = await r.json();
-    if (!clients?.length) {
-      wrap.innerHTML = '<div class="rt-clients-empty">Ingen WiFi-klienter tilkoblet.</div>';
-      return;
-    }
     wrap.innerHTML = `
-      <div class="cl-version-header">WiFi-klienter (${clients.length})</div>
+      <div class="cl-version-header">WiFi-klienter${clients?.length ? ' (' + clients.length + ')' : ''}</div>
+      ${!clients?.length ? '<div class="rt-clients-empty">Ingen tilkoblet.</div>' : `
       <div class="rt-clients">
         ${clients.map(c => `
           <div class="rt-client">
             <span class="rt-client-mac">${escapeHtml(c.mac || c.bssid || '?')}</span>
-            <span class="rt-client-signal">${c.signal ? c.signal + ' dBm' : '—'}</span>
+            <span class="rt-client-signal">${c.signal != null ? c.signal + ' dBm' : '—'}</span>
           </div>
         `).join('')}
-      </div>
+      </div>`}
     `;
   } catch {
     /* stille feil — ikke blokker hovedvisning */
   }
+}
+
+async function loadSmsInbox() {
+  const wrap = document.getElementById('rt-sms-inbox-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="rt-sms-loading">Laster SMS-innboks…</div>';
+  try {
+    const r = await fetch(`${BASE()}/api/router/sms-inbox`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { messages } = await r.json();
+    if (!messages?.length) {
+      wrap.innerHTML = `
+        <div class="cl-version-header">SMS-innboks</div>
+        <div class="rt-clients-empty">Ingen innkommende SMS.</div>
+      `;
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="cl-version-header">SMS-innboks (${messages.length})</div>
+      <div class="rt-sms-list">
+        ${messages.map(m => `
+          <div class="rt-sms-item">
+            <div class="rt-sms-header">
+              <span class="rt-sms-sender">${escapeHtml(m.sender || m.from || '?')}</span>
+              <span class="rt-sms-date">${formatSmsDate(m.date || m.timestamp || '')}</span>
+              <button class="rt-sms-del" data-index="${m.index ?? ''}" title="Slett">×</button>
+            </div>
+            <div class="rt-sms-body">${escapeHtml(m.message || m.text || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    wrap.querySelectorAll('.rt-sms-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Slette denne SMS-meldingen?')) return;
+        try {
+          await fetch(`${BASE()}/api/router/sms-inbox/${btn.dataset.index}`, { method: 'DELETE' });
+          loadSmsInbox();
+        } catch (e) {
+          alert('Feil: ' + e.message);
+        }
+      });
+    });
+  } catch (e) {
+    wrap.innerHTML = `
+      <div class="cl-version-header">SMS-innboks</div>
+      <div class="rt-clients-empty">Ikke tilgjengelig (${escapeHtml(e.message)})</div>
+    `;
+  }
+}
+
+async function loadRouterDebug() {
+  const wrap = document.getElementById('rt-debug-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="rt-sms-loading">Kjører diagnostikk…</div>';
+  try {
+    const { results } = await fetch(`${BASE()}/api/router/debug`).then(r => r.json());
+    wrap.innerHTML = `
+      <div class="cl-version-header" style="margin-top:12px">Ubus-diagnose</div>
+      <div class="rt-debug-table">
+        ${results.map(r => `
+          <div class="rt-debug-row rt-debug-${r.ok ? 'ok' : 'err'}">
+            <code class="rt-debug-path">${escapeHtml(r.path)}</code>
+            <span class="rt-debug-status">${r.ok ? '✓' : '✗ ' + escapeHtml(r.error || '')}</span>
+            ${r.ok && r.data ? `<details><summary>Data</summary><pre class="rt-debug-pre">${escapeHtml(JSON.stringify(r.data, null, 2))}</pre></details>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) {
+    wrap.innerHTML = `<div class="rt-clients-empty">Diagnose feilet: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function formatSmsDate(str) {
+  if (!str) return '';
+  // RUT200-format: "YY/MM/DD,HH:MM:SS+TZ"
+  const m = /^(\d{2})\/(\d{2})\/(\d{2}),(\d{2}:\d{2})/.exec(str);
+  if (m) return `${m[3]}.${m[2]}.20${m[1]} ${m[4]}`;
+  return str;
+}
+
+function fmtBytes(b) {
+  if (b == null || b < 0) return '—';
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 async function doRouterReboot() {
@@ -900,6 +1215,43 @@ function styles() {
     .feat-save-edit { width:auto !important; padding:0 10px; font-size:11px; border-color:var(--blue); color:var(--blue); font-weight:700; }
     .feat-cancel-edit { width:auto !important; padding:0 10px; font-size:11px; }
 
+    /* ── Status ── */
+    .st-ok     { color: var(--ok); }
+    .st-warn   { color: var(--warn); }
+    .st-danger { color: var(--danger); }
+
+    /* ── Status-kort ── */
+    .st-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    @media (max-width:600px) { .st-cards { grid-template-columns:1fr; } }
+    .st-card { padding:20px 16px; background:var(--white); border:1px solid var(--line); border-top:3px solid var(--blue); text-align:center; }
+    .st-card-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-light); margin-bottom:8px; }
+    .st-card-val { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:1.7rem; color:var(--ink); line-height:1.1; }
+    .st-card-sub { font-size:11px; color:var(--ink-light); margin-top:5px; font-family:'DM Mono',monospace; }
+    .st-card-sk-ok  { border-top-color:var(--ok); }
+    .st-card-sk-ok .st-card-val  { color:var(--ok); }
+    .st-card-sk-err { border-top-color:var(--danger); }
+    .st-card-sk-err .st-card-val { color:var(--danger); }
+
+    /* ── Metrikkrad (felles for Status og Konnektivitet) ── */
+    .st-metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+
+    /* ── Ingen modemdata + diagnose ── */
+    .rt-nodata { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 14px; background:var(--surface); border:1px solid var(--line); font-size:12px; color:var(--ink-light); font-style:italic; margin-bottom:4px; }
+    .rt-nodata code { font-family:'DM Mono',monospace; font-size:10px; font-style:normal; }
+    .rt-debug-btn { background:none; border:1px solid var(--line); font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:4px 10px; cursor:pointer; color:var(--ink-light); font-style:normal; }
+    .rt-debug-btn:hover { border-color:var(--blue); color:var(--blue); }
+    .rt-debug-table { border:1px solid var(--line); background:var(--white); }
+    .rt-debug-row { display:flex; gap:12px; padding:7px 12px; border-bottom:1px solid var(--line); align-items:flex-start; flex-wrap:wrap; }
+    .rt-debug-row:last-child { border-bottom:none; }
+    .rt-debug-ok { background:var(--ok-tint,#f0faf4); }
+    .rt-debug-err { background:var(--surface); }
+    .rt-debug-path { font-family:'DM Mono',monospace; font-size:11px; flex:1; min-width:200px; }
+    .rt-debug-status { font-size:11px; color:var(--ink-light); }
+    .rt-debug-ok .rt-debug-status { color:var(--ok); }
+    .rt-debug-err .rt-debug-status { color:var(--danger); }
+    .rt-debug-row details { width:100%; font-size:11px; }
+    .rt-debug-pre { margin:6px 0 0; font-family:'DM Mono',monospace; font-size:10px; white-space:pre-wrap; overflow-x:auto; color:var(--ink-medium); }
+
     /* ── Ruter ── */
     .rt-controls { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
     .rt-form { background:var(--surface); border:1px solid var(--line); padding:14px; margin-bottom:14px; }
@@ -939,5 +1291,26 @@ function styles() {
     .rt-client-mac { font-family:'DM Mono',monospace; }
     .rt-client-signal { color:var(--ink-light); }
     .rt-clients-empty { padding:12px; background:var(--surface); border:1px solid var(--line); font-size:12px; color:var(--ink-light); text-align:center; font-style:italic; }
+
+    /* ── Databruk ── */
+    .rt-section { margin-top:16px; }
+    .rt-section-title { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:13px; letter-spacing:.08em; color:var(--blue); padding:8px 0 6px; border-bottom:1px solid var(--line); margin-bottom:8px; text-transform:uppercase; }
+    .rt-traffic-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .rt-traffic-cell { padding:14px; background:var(--white); border:1px solid var(--line); text-align:center; }
+    .rt-traffic-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); }
+    .rt-traffic-val { font-family:'DM Mono',monospace; font-size:1.4rem; font-weight:600; color:var(--ink); margin:6px 0 2px; }
+    .rt-traffic-sub { font-size:10px; color:var(--ink-light); }
+
+    /* ── SMS-innboks ── */
+    .rt-sms-loading { padding:12px; font-size:12px; color:var(--ink-light); }
+    .rt-sms-list { border:1px solid var(--line); background:var(--white); }
+    .rt-sms-item { padding:10px 12px; border-bottom:1px solid var(--line); }
+    .rt-sms-item:last-child { border-bottom:none; }
+    .rt-sms-header { display:flex; gap:8px; align-items:baseline; margin-bottom:4px; }
+    .rt-sms-sender { font-family:'DM Mono',monospace; font-size:11px; font-weight:600; color:var(--ink); flex:1; }
+    .rt-sms-date { font-size:10px; color:var(--ink-light); white-space:nowrap; }
+    .rt-sms-del { background:none; border:none; cursor:pointer; color:var(--ink-light); font-size:16px; line-height:1; padding:0 4px; }
+    .rt-sms-del:hover { color:var(--danger); }
+    .rt-sms-body { font-size:13px; color:var(--ink-medium); line-height:1.5; }
   </style>`;
 }

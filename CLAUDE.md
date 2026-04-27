@@ -53,13 +53,14 @@
 - **YDEG-04N konfigurasjon ikke lett tilgjengelig** — fysisk plassering vanskeliggjør USB-tilkobling for å aktivere flere PGN-er (f.eks. sjøtemp via 130316). Hvis ny PGN trengs: monter separat sensor istedenfor å åpne YDEG.
 - SmartShunt 500A er strømsensor for BMV-712 (ikke en selvstendig enhet på Cerbo). All husbank-data går gjennom BMV-712 til Cerbo.
 - Shore power: ingen direkte deteksjon. **Inferens i `signalk.js`**: husbank lader (>1A) + motor av (RPM <100) → landstrøm tilkoblet. Forutsetter ingen solar (stemmer for Summer). UI viser "ukjent" hvis ikke kan utledes.
-- Hotspot-konfig: kobler til iPhone Personal Hotspot (172.20.10.x)
+- Nettverk: **Teltonika RUT200** wifi-ruter (SSID "Summer"), Cerbo IP `192.168.1.237`, ruter `192.168.1.1`
+- **RUT200 RutOS 7.x bruker REST-API på `/api`, IKKE legacy `/ubus` JSON-RPC** — uhttpd er konfigurert med `-l /api -L /www/cgi-bin/api_dispatcher.lua`. Selv om `JSON-RPC support`-pakken er installert eksponerer ikke uhttpd `/ubus`-endepunktet. Auth: `POST /api/login {username,password}` → Bearer-token (utløper etter ~5 min). Brukes i `backend/routes/router.js`. Krever `ROUTER_TLS=1` (HTTP-redirect til HTTPS uten body). Standard kalleliste: `/api/system/device/status` (board-info, ikke uptime), `/api/interfaces/status` (alle interfaces), `/api/modems/status` (SIM/signal), `/api/wireless/interfaces/status` (SSID). Uptime henter vi fra LAN-interface som proxy.
+- **iPhone Personal Hotspot-deteksjon**: når RUT200 er klient mot iPhonen, dukker den aktive uplinken opp som interface `wan1` på `wlan0-2` med proto `dhcp` og IP fra `172.20.10.0/28`-subnettet (Apples faste hotspot-subnet).
 
 ### Planlagt / ikke installert
-- Cloudflare Tunnel (erstatter ngrok)
+- Cloudflare Tunnel
 - Kystverket fartsgrense-integrasjon (WMS layer_754)
 - Bow thruster status via Cerbo GX digital inputs
-- RUT200 router (siste brikke for stabil ekstern tilgang)
 
 ## Viktig lærdom og gotchas
 
@@ -69,14 +70,13 @@
 - **SQLite-migrasjoner** må være idempotente (`CREATE TABLE IF NOT EXISTS`, sjekk `PRAGMA table_info` før `ALTER TABLE`)
 - **W-Bus krever genuine FTDI FT232RL chip** for pålitelig 2400 baud 8E1 på Venus OS
 - **LiFePO4-lading**: 800Ah-banken bør lades med minst 30A (helst mer via Cristec)
+- **N2K-bussens 12V-strøm kommer fra navigasjonsinstrumentene (plotter), ikke motoren.** Hvis nav-panelet er av, er hele N2K-bussen stum: ingen motor-PGN-er, ingen tank-nivå, ingen dybde til Cerbo. Cerbo-CAN-driveren er da fortsatt UP, men `ip -s link show vecan0` viser at RX står stille. Konsekvens: **skru på nav-instrumenter før motorstart** for at `sensorPoller` skal få logget noe. Signal K serverer siste kjente verdi med gammel timestamp når bussen er død — sensorPoller leser bare `.value` uten å sjekke alder, så stale nuller kan havne i `sensor_history`. Diagnose-snutt: `curl http://localhost:3000/signalk/v1/api/vessels/self/propulsion/port/revolutions` — sjekk at timestamp er fersk.
 
 ## Åpne tråder (prioritert)
 
-1. **SSH på Cerbo** — port 22 closed selv på Unsecured-profil + root-passord (Venus OS v3.72). Trenger USB/SD-stick med setpasswd.txt-trick. Blokker for deploy av Bavapp på Cerbo.
-2. **Deploy Bavapp på Cerbo** — venter på SSH. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
+1. **Deploy Bavapp på Cerbo** — SSH fungerer (løst april 2026). Kjør `./sync-to-cerbo.sh`. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
 4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
-5. **RUT200** — siste brikke for stabil ekstern tilgang før hotspot-avhengighet faller
-6. **Cloudflare Tunnel** — erstatt ngrok når RUT200 er på
+5. **Cloudflare Tunnel** — erstatt ngrok, RUT200 er nå på plass
 7. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo Node-RED-konfig
 8. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
 9. **Bekreft Cristec-lader-modell** — bilde av typeskilt
