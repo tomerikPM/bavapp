@@ -18,6 +18,35 @@ async function ensureChartJS() {
 
 let _charts = {};
 
+// Effektivitets-klassifisering: "optimal" hvis best i regimet, "ineffektiv"
+// hvis L/nm > 1.5× minimum i samme regime (fanger hump-aktig forbruk selv
+// når snittfarten teknisk er "lav"), ellers det rene regimet.
+const INEFF_FACTOR = 1.5;
+
+function classify(buckets, isOptFn) {
+  const minByRegime = {};
+  for (const b of buckets) {
+    if (b.avg_lnm == null || b.samples < 5) continue;
+    const cur = minByRegime[b.regime];
+    if (cur == null || b.avg_lnm < cur) minByRegime[b.regime] = b.avg_lnm;
+  }
+  return buckets.map(b => {
+    if (isOptFn(b)) return 'optimal';
+    if (b.regime === 'hump') return 'hump';
+    const min = minByRegime[b.regime];
+    if (min != null && b.avg_lnm != null && b.avg_lnm > min * INEFF_FACTOR) return 'inefficient';
+    return b.regime; // 'low' eller 'plane'
+  });
+}
+
+const EFF_COLORS = {
+  optimal:     { fill: '#1a7040',   border: '#1a7040' },
+  low:         { fill: '#5a8fbf33', border: '#5a8fbf' },
+  plane:       { fill: '#003b7e33', border: '#003b7e' },
+  hump:        { fill: '#b8600033', border: '#b86000' },
+  inefficient: { fill: '#b8600033', border: '#b86000' },
+};
+
 export async function render(container) {
   container.innerHTML = `
     <div class="ph">
@@ -221,9 +250,10 @@ function renderSummary(data) {
   if (help) {
     help.style.display = '';
     help.innerHTML = `
-      <span class="eff-regime-pill eff-regime-low">Lav fart</span> deplassement, skroget pløyer ikke ·
-      <span class="eff-regime-pill eff-regime-hump">${reg.low_max}–${reg.plane_min} kn</span> "humpen" — dyrest L/nm, unngås ·
-      <span class="eff-regime-pill eff-regime-plane">I plan</span> skroget løftes, L/nm faller igjen`;
+      <span class="eff-regime-pill eff-regime-low">Lav fart</span> deplassement ·
+      <span class="eff-regime-pill eff-regime-hump">${reg.low_max}–${reg.plane_min} kn</span> "humpen" — dyrest L/nm ·
+      <span class="eff-regime-pill eff-regime-plane">I plan</span> skroget løftes, L/nm faller igjen<br>
+      Grønn = best i regimet · oransje = hump eller L/nm > ${INEFF_FACTOR}× regime-minimum (ineffektiv)`;
   }
 }
 
@@ -236,17 +266,12 @@ function renderRpmChart(data) {
   const optLow    = data.optimal_rpm_low?.rpm_min;
   const optPlane  = data.optimal_rpm_plane?.rpm_min;
   const isOpt     = b => b.rpm_min === optLow || b.rpm_min === optPlane;
-  const regimeBg  = b => b.regime === 'hump' ? '#b8600033'
-                       : b.regime === 'plane' ? '#003b7e33'
-                       : '#1a704033';
-  const regimeFg  = b => b.regime === 'hump' ? '#b86000'
-                       : b.regime === 'plane' ? '#003b7e'
-                       : '#1a7040';
+  const effCls    = classify(buckets, isOpt);
   const labels    = buckets.map(b => `${b.rpm_min}`);
   const lphVals   = buckets.map(b => b.avg_lph);
   const lnmVals   = buckets.map(b => b.avg_lnm);
-  const barColors = buckets.map(b => isOpt(b) ? '#1a7040' : regimeBg(b));
-  const barBorder = buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b));
+  const barColors = effCls.map(c => EFF_COLORS[c].fill);
+  const barBorder = effCls.map(c => EFF_COLORS[c].border);
 
   _charts['rpm'] = new window.Chart(canvas, {
     data: {
@@ -268,7 +293,7 @@ function renderRpmChart(data) {
           data: lnmVals,
           borderColor: '#b86000',
           backgroundColor: 'transparent',
-          pointBackgroundColor: buckets.map(b => isOpt(b) ? '#1a7040' : '#b86000'),
+          pointBackgroundColor: effCls.map(c => EFF_COLORS[c].border),
           pointRadius: 4,
           tension: 0.3,
           yAxisID: 'yLnm',
@@ -324,16 +349,19 @@ function renderRpmChart(data) {
   const optBadge = b => b.rpm_min === optLow   ? '<span class="badge-opt">Best lav</span>'
                       : b.rpm_min === optPlane ? '<span class="badge-opt">Best plan</span>'
                       : '';
+  const rows = buckets
+    .map((b, i) => ({ b, c: effCls[i] }))
+    .filter(({ b }) => b.avg_lnm != null);
   table.innerHTML = `
     <table class="eff-table">
       <thead><tr>
         <th>RPM-band</th><th>Regime</th><th>L/h</th><th>L/nm</th><th>Snitt kn</th><th>Målinger</th>
       </tr></thead>
       <tbody>
-        ${buckets.filter(b => b.avg_lnm != null).map(b => `
-          <tr class="${isOpt(b) ? 'optimal' : (b.regime === 'hump' ? 'hump' : '')}">
+        ${rows.map(({ b, c }) => `
+          <tr class="${c === 'optimal' ? 'optimal' : (c === 'hump' || c === 'inefficient' ? 'hump' : '')}">
             <td>${b.rpm_min}–${b.rpm_max}${optBadge(b)}</td>
-            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span></td>
+            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span>${c === 'inefficient' ? '<span class="eff-regime-pill eff-regime-hump">Ineff.</span>' : ''}</td>
             <td>${b.avg_lph.toFixed(1)}</td>
             <td>${b.avg_lnm.toFixed(2)}</td>
             <td>${b.avg_kn.toFixed(1)}</td>
@@ -352,17 +380,12 @@ function renderSpdChart(data) {
   const optLow    = data.optimal_low?.speed_min;
   const optPlane  = data.optimal_plane?.speed_min;
   const isOpt     = b => b.speed_min === optLow || b.speed_min === optPlane;
-  const regimeBg  = b => b.regime === 'hump' ? '#b8600033'
-                       : b.regime === 'plane' ? '#003b7e33'
-                       : '#1a704033';
-  const regimeFg  = b => b.regime === 'hump' ? '#b86000'
-                       : b.regime === 'plane' ? '#003b7e'
-                       : '#1a7040';
+  const effCls    = classify(buckets, isOpt);
   const labels    = buckets.map(b => b.speed_mid.toFixed(1));
   const lphVals   = buckets.map(b => b.avg_lph);
   const lnmVals   = buckets.map(b => b.avg_lnm);
-  const barColors = buckets.map(b => isOpt(b) ? '#1a7040' : regimeBg(b));
-  const barBorder = buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b));
+  const barColors = effCls.map(c => EFF_COLORS[c].fill);
+  const barBorder = effCls.map(c => EFF_COLORS[c].border);
 
   _charts['spd'] = new window.Chart(canvas, {
     data: {
@@ -384,7 +407,7 @@ function renderSpdChart(data) {
           data: lnmVals,
           borderColor: '#003b7e',
           backgroundColor: 'transparent',
-          pointBackgroundColor: buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b)),
+          pointBackgroundColor: effCls.map(c => EFF_COLORS[c].border),
           pointRadius: 4,
           tension: 0.3,
           yAxisID: 'yLnm',
@@ -442,14 +465,17 @@ function renderSpdChart(data) {
         <th>Fart</th><th>Regime</th><th>L/h</th><th>L/nm</th><th>Målinger</th>
       </tr></thead>
       <tbody>
-        ${buckets.map(b => `
-          <tr class="${isOpt(b) ? 'optimal' : (b.regime === 'hump' ? 'hump' : '')}">
+        ${buckets.map((b, i) => {
+          const c = effCls[i];
+          return `
+          <tr class="${c === 'optimal' ? 'optimal' : (c === 'hump' || c === 'inefficient' ? 'hump' : '')}">
             <td>${b.speed_mid.toFixed(1)} kn${optBadge(b)}</td>
-            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span></td>
+            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span>${c === 'inefficient' ? '<span class="eff-regime-pill eff-regime-hump">Ineff.</span>' : ''}</td>
             <td>${b.avg_lph.toFixed(1)}</td>
             <td>${b.avg_lnm.toFixed(2)}</td>
             <td>${b.samples}</td>
-          </tr>`).join('')}
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>`;
 }
