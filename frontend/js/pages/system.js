@@ -713,6 +713,7 @@ async function loadRouterStatus() {
     if (_routerReachable) {
       loadWifiClients();
       loadSmsInbox();
+      loadRouterCharts();
       document.getElementById('rt-debug-btn')?.addEventListener('click', loadRouterDebug);
     }
   } catch (e) {
@@ -765,48 +766,19 @@ function renderRouterBody(status, cfg, traffic) {
                                               : 'fair')
                        : 'offline';
 
-  const trafficHtml = (traffic && !traffic.error && (traffic.rx_bytes != null || traffic.tx_bytes != null)) ? `
-    <div class="cl-version-header" style="margin-top:20px">Databruk (siden siste reset)</div>
-    <div class="rt-traffic-grid">
-      <div class="rt-traffic-cell">
-        <div class="rt-traffic-lbl">↓ Mottatt</div>
-        <div class="rt-traffic-val">${fmtBytes(traffic.rx_bytes)}</div>
-        ${traffic.rx_packets != null ? `<div class="rt-traffic-sub">${traffic.rx_packets.toLocaleString('no')} pakker</div>` : ''}
-      </div>
-      <div class="rt-traffic-cell">
-        <div class="rt-traffic-lbl">↑ Sendt</div>
-        <div class="rt-traffic-val">${fmtBytes(traffic.tx_bytes)}</div>
-        ${traffic.tx_packets != null ? `<div class="rt-traffic-sub">${traffic.tx_packets.toLocaleString('no')} pakker</div>` : ''}
-      </div>
-    </div>
-  ` : '';
+  const trafficSummary = (traffic && !traffic.error && (traffic.rx_bytes != null || traffic.tx_bytes != null))
+    ? ` · ↓ ${fmtBytes(traffic.rx_bytes)} ↑ ${fmtBytes(traffic.tx_bytes)} (siden reset)`
+    : '';
 
-  // Cellulær-seksjon — bare hvis SIM og data finnes
   const cellularHtml = m ? `
-    <div class="cl-version-header" style="margin-top:20px">Mobilsignal</div>
-    <div class="rt-hero rt-hero-${signalClass(m.signal)}" style="margin-bottom:10px">
-      <div class="rt-hero-row">
-        <div class="rt-hero-cell">
-          <div class="rt-hero-lbl">RSSI</div>
-          <div class="rt-hero-val">${fmtSignal(m.signal)}</div>
-          <div class="rt-hero-sub">${signalBars(m.signal)}</div>
-        </div>
-        <div class="rt-hero-cell">
-          <div class="rt-hero-lbl">Nettverk</div>
-          <div class="rt-hero-val">${escapeHtml(m.networkType || '—')}</div>
-          <div class="rt-hero-sub">${escapeHtml(m.operator || '—')}</div>
-        </div>
-        <div class="rt-hero-cell">
-          <div class="rt-hero-lbl">Band / Cell</div>
-          <div class="rt-hero-val">${escapeHtml(m.band || '—')}</div>
-          <div class="rt-hero-sub">${m.cellId ? 'Cell ' + escapeHtml(String(m.cellId)) : '—'}</div>
-        </div>
-      </div>
-    </div>
-    <div class="st-metric-row" style="grid-template-columns:repeat(3,1fr)">
+    <div class="cl-version-header" style="margin-top:14px;margin-bottom:8px">Mobilsignal</div>
+    <div class="rt-cell-grid">
+      ${rtStat('RSSI', fmtSignal(m.signal), '', signalBars(m.signal))}
       ${rtStat('SINR', fmtOrDash(m.sinr, ' dB'))}
       ${rtStat('RSRP', fmtOrDash(m.rsrp, ' dBm'))}
       ${rtStat('RSRQ', fmtOrDash(m.rsrq, ' dB'))}
+      ${rtStat('Operatør', m.operator || '—')}
+      ${rtStat('Nettverk', [m.networkType, m.band].filter(Boolean).join(' · ') || '—')}
     </div>
   ` : '';
 
@@ -823,9 +795,9 @@ function renderRouterBody(status, cfg, traffic) {
     }
     if (src === 'cellular') {
       return {
-        lbl: 'Operatør',
-        val: m?.operator || '—',
-        sub: m?.networkType || w.proto || '—',
+        lbl: 'Signal',
+        val: fmtSignal(m?.signal),
+        sub: signalBars(m?.signal),
       };
     }
     return {
@@ -889,20 +861,30 @@ function renderRouterBody(status, cfg, traffic) {
 
     ${cellularHtml}
     ${!status.hasSim ? `
-      <div class="cl-version-header" style="margin-top:20px">Mobilsignal</div>
+      <div class="cl-version-header" style="margin-top:14px">Mobilsignal</div>
       <div class="rt-clients-empty">Ingen SIM-kort installert i ruteren.</div>
     ` : ''}
 
-    <div class="cl-version-header" style="margin-top:20px">Ruter</div>
-    <div class="st-metric-row">
-      ${rtStat('Sys. uptime', fmtUptime(status.uptime))}
-      ${rtStat('WiFi-klienter', '…', 'rt-wifi-client-count')}
-      ${rtStat('SIM', status.hasSim ? 'Installert' : 'Ikke installert')}
+    <div class="rt-ruter-meta">
+      Uptime: <strong>${fmtUptime(status.uptime)}</strong>
+      · WiFi: <strong id="rt-wifi-client-count">…</strong>
+      · SIM: <strong>${status.hasSim ? '✓ Installert' : '✗ Ikke installert'}</strong>${escapeHtml(trafficSummary)}
     </div>
 
-    ${trafficHtml}
+    <div class="rt-charts-row">
+      <div class="rt-chart-wrap">
+        <div class="rt-chart-title">Mobilsignal · siste 6t</div>
+        <canvas id="rt-signal-chart" height="160"></canvas>
+        <div id="rt-signal-empty" class="rt-chart-empty" hidden>Historikk akkumuleres — grafen oppdateres automatisk.</div>
+      </div>
+      <div class="rt-chart-wrap">
+        <div class="rt-chart-title">Databruk · siste 6t</div>
+        <canvas id="rt-usage-chart" height="160"></canvas>
+        <div id="rt-usage-empty" class="rt-chart-empty" hidden>Historikk akkumuleres — grafen oppdateres automatisk.</div>
+      </div>
+    </div>
 
-    <div id="rt-clients-wrap" style="margin-top:20px"></div>
+    <div id="rt-clients-wrap" style="margin-top:16px"></div>
     ${!status.hasSim ? `
       <div class="cl-version-header" style="margin-top:20px">SMS-innboks</div>
       <div class="rt-clients-empty">Ingen SIM-kort installert.</div>
@@ -912,10 +894,11 @@ function renderRouterBody(status, cfg, traffic) {
   `;
 }
 
-function rtStat(lbl, val, id = '') {
+function rtStat(lbl, val, id = '', sub = null) {
   return `<div class="rt-stat">
     <div class="rt-stat-lbl">${lbl}</div>
     <div class="rt-stat-val"${id ? ` id="${id}"` : ''}>${escapeHtml(String(val))}</div>
+    ${sub != null ? `<div class="rt-stat-sub">${escapeHtml(String(sub))}</div>` : ''}
   </div>`;
 }
 
@@ -1110,6 +1093,155 @@ function stopRouterPolling() {
   if (_routerPollTimer) { clearInterval(_routerPollTimer); _routerPollTimer = null; }
 }
 
+// ── Router charts ────────────────────────────────────────────────────────────
+
+let _rtCharts = {};
+let _rtChartjsReady = false;
+
+async function ensureChartJSRouter() {
+  if (_rtChartjsReady && window.Chart) return;
+  if (!document.querySelector('script[src*="chart.js"]')) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js';
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  _rtChartjsReady = true;
+}
+
+async function loadRouterCharts() {
+  try {
+    const r = await fetch(`${BASE()}/api/router/history?hours=6`);
+    if (!r.ok) return;
+    const { rows } = await r.json();
+    await ensureChartJSRouter();
+    renderSignalChart(rows || []);
+    renderUsageChart(rows || []);
+  } catch { /* stille — chart er ikke kritisk */ }
+}
+
+function renderSignalChart(rows) {
+  if (_rtCharts.signal) { _rtCharts.signal.destroy(); delete _rtCharts.signal; }
+  const canvas = document.getElementById('rt-signal-chart');
+  const empty  = document.getElementById('rt-signal-empty');
+  const pts    = rows.filter(r => r.signal_dbm != null);
+  if (!pts.length) {
+    if (canvas) canvas.hidden = true;
+    if (empty)  empty.hidden  = false;
+    return;
+  }
+  if (canvas) canvas.hidden = false;
+  if (empty)  empty.hidden  = true;
+  if (!canvas || !window.Chart) return;
+
+  const labels = pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' }));
+
+  _rtCharts.signal = new window.Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'RSSI (dBm)',
+        data: pts.map(r => r.signal_dbm),
+        borderColor: '#003b7e',
+        backgroundColor: 'rgba(0,59,126,0.07)',
+        borderWidth: 1.5,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.raw} dBm` } },
+      },
+      scales: {
+        x: { ticks: { font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 6, maxRotation: 0 }, grid: { color: '#f0f0f0' } },
+        y: {
+          title: { display: true, text: 'dBm', font: { family: 'Barlow Condensed', size: 9 } },
+          ticks: { font: { family: 'DM Mono', size: 9 } },
+          grid: { color: '#f0f0f0' },
+        },
+      },
+    },
+  });
+}
+
+function renderUsageChart(rows) {
+  if (_rtCharts.usage) { _rtCharts.usage.destroy(); delete _rtCharts.usage; }
+  const canvas = document.getElementById('rt-usage-chart');
+  const empty  = document.getElementById('rt-usage-empty');
+  const pts    = rows.filter(r => r.rx_bytes != null || r.tx_bytes != null);
+  if (!pts.length) {
+    if (canvas) canvas.hidden = true;
+    if (empty)  empty.hidden  = false;
+    return;
+  }
+  if (canvas) canvas.hidden = false;
+  if (empty)  empty.hidden  = true;
+  if (!canvas || !window.Chart) return;
+
+  const rx0    = pts[0].rx_bytes ?? 0;
+  const tx0    = pts[0].tx_bytes ?? 0;
+  const toMB   = (bytes, base) => bytes != null ? Math.round((bytes - base) / 1024 / 1024 * 10) / 10 : null;
+  const labels = pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' }));
+
+  _rtCharts.usage = new window.Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '↓ Ned',
+          data: pts.map(r => toMB(r.rx_bytes, rx0)),
+          borderColor: '#003b7e',
+          backgroundColor: 'rgba(0,59,126,0.07)',
+          borderWidth: 1.5,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+        },
+        {
+          label: '↑ Opp',
+          data: pts.map(r => toMB(r.tx_bytes, tx0)),
+          borderColor: '#b86000',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { font: { family: 'Barlow Condensed', size: 10 }, boxWidth: 10, padding: 8 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw} MB` } },
+      },
+      scales: {
+        x: { ticks: { font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 6, maxRotation: 0 }, grid: { color: '#f0f0f0' } },
+        y: {
+          title: { display: true, text: 'MB', font: { family: 'Barlow Condensed', size: 9 } },
+          ticks: { font: { family: 'DM Mono', size: 9 } },
+          grid: { color: '#f0f0f0' },
+        },
+      },
+    },
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // STYLES
 // ══════════════════════════════════════════════════════════════════════
@@ -1284,9 +1416,21 @@ function styles() {
 
     .rt-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
     @media (min-width:600px) { .rt-grid { grid-template-columns:repeat(5,1fr); } }
-    .rt-stat { padding:10px; background:var(--white); border:1px solid var(--line); text-align:center; }
+    .rt-stat { padding:8px 6px; background:var(--white); border:1px solid var(--line); text-align:center; }
     .rt-stat-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); }
-    .rt-stat-val { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1rem; color:var(--ink); margin-top:4px; }
+    .rt-stat-val { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:.95rem; color:var(--ink); margin-top:3px; }
+    .rt-stat-sub { font-size:9px; color:var(--ink-light); letter-spacing:.04em; margin-top:2px; }
+
+    .rt-cell-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; }
+    @media (min-width:500px) { .rt-cell-grid { grid-template-columns:repeat(6,1fr); } }
+
+    .rt-ruter-meta { font-size:11px; color:var(--ink-light); padding:4px 0 10px; line-height:1.6; }
+    .rt-ruter-meta strong { color:var(--ink); font-weight:600; }
+
+    .rt-charts-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+    .rt-chart-wrap { border:1px solid var(--line); background:var(--white); padding:10px 10px 6px; }
+    .rt-chart-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); margin-bottom:6px; }
+    .rt-chart-empty { font-size:11px; color:var(--ink-light); font-style:italic; text-align:center; padding:20px 0; }
 
     .rt-meta { text-align:right; font-size:10px; color:var(--ink-light); margin-top:10px; font-style:italic; }
     .rt-clients { border:1px solid var(--line); background:var(--white); }

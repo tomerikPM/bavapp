@@ -22,6 +22,7 @@ const express = require('express');
 const http    = require('http');
 const https   = require('https');
 const router  = express.Router();
+const db      = require('../db');
 
 const ROUTER_IP   = process.env.ROUTER_IP   || '192.168.1.1';
 const ROUTER_USER = process.env.ROUTER_USER || 'admin';
@@ -469,6 +470,16 @@ router.delete('/sms-inbox/:id', async (req, res) => {
   }
 });
 
+// GET /api/router/history — tidsseriedata for signal og databruk
+router.get('/history', (req, res) => {
+  const hours = Math.min(72, Math.max(1, parseInt(req.query.hours || '6', 10)));
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const rows  = db.prepare(
+    'SELECT ts, signal_dbm, rx_bytes, tx_bytes FROM router_history WHERE ts >= ? ORDER BY ts ASC'
+  ).all(since);
+  res.json({ rows, hours });
+});
+
 // GET /api/router/debug — probe alle interessante endepunkter
 router.get('/debug', async (req, res) => {
   if (!ROUTER_PASS) return res.status(503).json({ error: 'ROUTER_PASS ikke satt' });
@@ -493,5 +504,51 @@ router.get('/debug', async (req, res) => {
   const results = await Promise.all(paths.map(p => probe(p).then(r => ({ path: p, ...r }))));
   res.json({ results, ts: new Date().toISOString() });
 });
+
+// ── Router history poller ─────────────────────────────────────────────────────
+// Tar snapshots av signal + trafikk hvert 2. minutt uten å vente på at noen
+// åpner siden. Lagrer i router_history for grafvisning.
+
+const _histInsert = db.prepare(
+  'INSERT INTO router_history (ts, signal_dbm, rx_bytes, tx_bytes) VALUES (?,?,?,?)'
+);
+const _histPrune = db.prepare(
+  "DELETE FROM router_history WHERE ts < datetime('now', '-7 days')"
+);
+
+async function recordRouterHistory() {
+  if (!ROUTER_PASS) return;
+  try {
+    const [modems, ifStatus] = await Promise.allSettled([
+      tryGet(['/api/modems/status', '/api/mobile/modem/status']),
+      tryGet(['/api/interfaces/status', '/api/network/interfaces/status']),
+    ]);
+
+    const mData  = modems.status === 'fulfilled' ? modems.value : null;
+    const mList  = mData ? pickFirstArray(mData.data, mData, mData.modems) : [];
+    const mod    = mList[0] || null;
+    const signal = mod?.signal ?? mod?.rssi ?? null;
+
+    const ifData = ifStatus.status === 'fulfilled' ? ifStatus.value : null;
+    const ifaces = ifData ? pickFirstArray(ifData.data, ifData, ifData.interfaces) : [];
+    const wan    = ifaces.find(i => {
+      const id = (i.id || i.interface || i.name || '').toLowerCase();
+      return id.startsWith('mob') || id === 'wan' || id === 'wwan';
+    });
+    const stats   = wan?.statistics || wan?.stats || {};
+    const rxBytes = stats.rx_bytes ?? null;
+    const txBytes = stats.tx_bytes ?? null;
+
+    if (signal != null || rxBytes != null) {
+      _histInsert.run(new Date().toISOString(), signal, rxBytes, txBytes);
+    }
+  } catch { /* ruteren kan være utilgjengelig */ }
+}
+
+if (ROUTER_PASS) {
+  recordRouterHistory();
+  setInterval(recordRouterHistory, 2 * 60_000);
+  setInterval(() => { try { _histPrune.run(); } catch {} }, 3_600_000);
+}
 
 module.exports = router;

@@ -122,6 +122,15 @@ db.exec(`
     unit      TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS router_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    signal_dbm INTEGER,
+    rx_bytes   INTEGER,
+    tx_bytes   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_router_history_ts ON router_history(ts DESC);
+
   CREATE TABLE IF NOT EXISTS diag_events (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL,
