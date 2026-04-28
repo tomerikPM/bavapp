@@ -382,18 +382,30 @@ router.post('/sms', async (req, res) => {
 router.get('/wifi-clients', async (req, res) => {
   if (!ROUTER_PASS) return res.status(503).json({ error: 'ROUTER_PASS ikke satt' });
   try {
+    // RutOS 7.x: assoclist ligger nested i interfaces/status, ikke devices/status
     const data = await tryGet([
+      '/api/wireless/interfaces/status',
       '/api/wireless/devices/status',
       '/api/wireless/clients',
     ]);
-    if (data?._error) return res.json({ clients: [] });
-    // Plukk ut klienter — formatet varierer
+    if (data?._error) return res.json({ clients: [], _debug: data });
+
     const all = pickFirstArray(data.data, data);
     const clients = [];
-    for (const dev of all) {
-      const stations = dev.stations || dev.assoclist || dev.clients || [];
-      for (const s of stations) clients.push(s);
+
+    for (const item of all) {
+      // Format A: interface-objekt med nested assoclist/stations/clients
+      const nested = item.stations || item.assoclist || item.clients || item.associated || [];
+      if (nested.length) {
+        for (const s of nested) clients.push(s);
+        continue;
+      }
+      // Format B: item er selve klienten (har mac-adresse)
+      if (item.mac || item.bssid || item.station) {
+        clients.push(item);
+      }
     }
+
     res.json({ clients });
   } catch (e) {
     res.status(502).json({ error: e.message });
@@ -471,6 +483,7 @@ router.get('/debug', async (req, res) => {
     '/api/network/interfaces/status',
     '/api/wireless/devices/status',
     '/api/wireless/interfaces/status',
+    '/api/wireless/clients',
     '/api/modems/status',
     '/api/modems/0/status',
     '/api/modems/0/serving',

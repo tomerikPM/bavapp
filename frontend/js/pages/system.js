@@ -896,7 +896,7 @@ function renderRouterBody(status, cfg, traffic) {
     <div class="cl-version-header" style="margin-top:20px">Ruter</div>
     <div class="st-metric-row">
       ${rtStat('Sys. uptime', fmtUptime(status.uptime))}
-      ${rtStat('WiFi-klienter', status.wifiClients ?? '—')}
+      ${rtStat('WiFi-klienter', '…', 'rt-wifi-client-count')}
       ${rtStat('SIM', status.hasSim ? 'Installert' : 'Ikke installert')}
     </div>
 
@@ -912,10 +912,10 @@ function renderRouterBody(status, cfg, traffic) {
   `;
 }
 
-function rtStat(lbl, val) {
+function rtStat(lbl, val, id = '') {
   return `<div class="rt-stat">
     <div class="rt-stat-lbl">${lbl}</div>
-    <div class="rt-stat-val">${escapeHtml(String(val))}</div>
+    <div class="rt-stat-val"${id ? ` id="${id}"` : ''}>${escapeHtml(String(val))}</div>
   </div>`;
 }
 
@@ -938,6 +938,7 @@ function signalBars(dbm) {
 }
 function fmtUptime(s) {
   if (s == null) return '—';
+  if (s < 60)   return '<1 min';
   const days = Math.floor(s / 86400);
   const hrs  = Math.floor((s % 86400) / 3600);
   const mins = Math.floor((s % 3600) / 60);
@@ -953,9 +954,12 @@ async function loadWifiClients() {
     const r = await fetch(`${BASE()}/api/router/wifi-clients`);
     if (!r.ok) return;
     const { clients } = await r.json();
+    const count = clients?.length ?? 0;
+    const countEl = document.getElementById('rt-wifi-client-count');
+    if (countEl) countEl.textContent = String(count);
     wrap.innerHTML = `
-      <div class="cl-version-header">WiFi-klienter${clients?.length ? ' (' + clients.length + ')' : ''}</div>
-      ${!clients?.length ? '<div class="rt-clients-empty">Ingen tilkoblet.</div>' : `
+      <div class="cl-version-header">WiFi-klienter${count ? ' (' + count + ')' : ''}</div>
+      ${!count ? '<div class="rt-clients-empty">Ingen tilkoblet.</div>' : `
       <div class="rt-clients">
         ${clients.map(c => `
           <div class="rt-client">
