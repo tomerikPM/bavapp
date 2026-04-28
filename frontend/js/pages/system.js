@@ -1133,6 +1133,9 @@ function renderSignalChart(rows) {
   wrap.style.display  = '';
   empty.style.display = 'none';
 
+  const sigColor = dbm => dbm >= -70 ? '#1a7040' : dbm >= -85 ? '#b86000' : '#b01020';
+  const sigBg    = dbm => dbm >= -70 ? 'rgba(26,112,64,0.10)' : dbm >= -85 ? 'rgba(184,96,0,0.10)' : 'rgba(176,16,32,0.10)';
+
   _rtCharts.signal = new window.Chart(canvas, {
     type: 'line',
     data: {
@@ -1140,13 +1143,18 @@ function renderSignalChart(rows) {
       datasets: [{
         label: 'RSSI',
         data: pts.map(r => r.signal_dbm),
-        borderColor: '#003b7e',
-        backgroundColor: 'rgba(0,59,126,0.08)',
         borderWidth: 1.5,
         fill: true,
         tension: 0.3,
         pointRadius: 0,
         pointHoverRadius: 3,
+        segment: {
+          borderColor: ctx => sigColor(ctx.p1.parsed.y),
+          backgroundColor: ctx => sigBg(ctx.p1.parsed.y),
+        },
+        // fallback farge for første render
+        borderColor: sigColor(pts[0]?.signal_dbm),
+        backgroundColor: sigBg(pts[0]?.signal_dbm),
       }],
     },
     options: {
@@ -1154,11 +1162,19 @@ function renderSignalChart(rows) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: ctx => `${ctx.raw} dBm` } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              const q = v >= -70 ? 'Utmerket' : v >= -85 ? 'Bra' : v >= -100 ? 'Variabelt' : 'Svakt';
+              return `${v} dBm — ${q}`;
+            },
+          },
+        },
       },
       scales: {
         x: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'Barlow Condensed', size: 10 }, maxTicksLimit: 5, maxRotation: 0 } },
-        y: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'DM Mono', size: 10 }, callback: v => v + ' dB' } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'DM Mono', size: 10 }, callback: v => v + ' dBm' } },
       },
     },
   });
