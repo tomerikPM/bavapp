@@ -185,7 +185,7 @@ async function runAnalysis() {
 
     const [effData, tripsData] = await Promise.all([
       fetch(url).then(r => r.json()),
-      fetch(`${BASE()}/api/trips?limit=50`).then(r => r.json()).catch(() => ({ trips: [] })),
+      fetch(`${BASE()}/api/trips?limit=50&compute_fuel=1`).then(r => r.json()).catch(() => ({ data: [] })),
     ]);
 
     loading.style.display = 'none';
@@ -194,23 +194,29 @@ async function runAnalysis() {
       if (el) el.style.opacity = '';
     });
 
-    if (!effData.sample_count) {
-      empty.style.display = '';
-      return;
-    }
-
     const meta = document.getElementById('eff-meta');
     if (meta) {
       const fromStr = new Date(effData.from).toLocaleDateString('no');
       const toStr   = new Date(effData.to).toLocaleDateString('no');
-      meta.textContent = `${effData.sample_count.toLocaleString('no')} korrelerte målinger · ${fromStr}–${toStr}`;
+      meta.textContent = effData.sample_count
+        ? `${effData.sample_count.toLocaleString('no')} korrelerte målinger · ${fromStr}–${toStr}`
+        : `Ingen korrelerte sensordata for ${fromStr}–${toStr}`;
     }
 
-    renderSummary(effData);
     await ensureChartJS();
-    renderRpmChart(effData);
-    renderSpdChart(effData);
-    renderTripsChart(tripsData.trips || tripsData);
+    if (effData.sample_count) {
+      renderSummary(effData);
+      renderRpmChart(effData);
+      renderSpdChart(effData);
+    } else {
+      // Skjul RPM-/fartskort, men la per-tur-fanen fortsatt rendre
+      ['eff-summary', 'eff-regime-help'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      ['rpm', 'spd'].forEach(k => destroyChart(k));
+    }
+    renderTripsChart(tripsData.data || tripsData.trips || tripsData);
   } catch (err) {
     loading.style.display = 'none';
     empty.style.display   = '';
@@ -487,13 +493,20 @@ function renderTripsChart(trips) {
   if (!canvas || !window.Chart) return;
 
   const validTrips = (trips || [])
-    .filter(t => parseFloat(t.fuel_used_l) > 0 && parseFloat(t.distance_nm) > 0.5)
-    .map(t => ({
+    .map(t => {
+      const fuel = t.fuel_used_l != null ? parseFloat(t.fuel_used_l)
+                 : t.fuel_used_l_calc != null ? parseFloat(t.fuel_used_l_calc)
+                 : null;
+      return { t, fuel, source: t.fuel_used_l != null ? 'logg' : 'sensor' };
+    })
+    .filter(({ t, fuel }) => fuel > 0 && parseFloat(t.distance_nm) > 0.5)
+    .map(({ t, fuel, source }) => ({
       name: t.name || t.start_ts?.slice(0, 10) || 'Tur',
-      lnm:  Math.round((parseFloat(t.fuel_used_l) / parseFloat(t.distance_nm)) * 100) / 100,
+      lnm:  Math.round((fuel / parseFloat(t.distance_nm)) * 100) / 100,
       nm:   parseFloat(t.distance_nm).toFixed(1),
-      fuel: parseFloat(t.fuel_used_l).toFixed(1),
+      fuel: fuel.toFixed(1),
       date: t.start_ts,
+      source,
     }))
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
     .slice(-20); // maks 20 turer
@@ -542,7 +555,8 @@ function renderTripsChart(trips) {
             title: (items) => validTrips[items[0].dataIndex].name,
             afterBody: (items) => {
               const t = validTrips[items[0].dataIndex];
-              return [`${t.fuel} L · ${t.nm} nm`, t.date ? new Date(t.date).toLocaleDateString('no') : ''];
+              const src = t.source === 'sensor' ? ' (sensor)' : '';
+              return [`${t.fuel} L${src} · ${t.nm} nm`, t.date ? new Date(t.date).toLocaleDateString('no') : ''];
             },
           },
         },

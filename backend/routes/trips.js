@@ -4,15 +4,39 @@ const router  = express.Router();
 const { randomUUID } = require('crypto');
 const db = require('../db');
 
+// Trapesintegrasjon av propulsion.port.fuel.rate (m³/s) over et intervall → liter
+function computeFuelLiters(from, to) {
+  const rows = db.prepare(
+    `SELECT ts, value FROM sensor_history
+     WHERE path = 'propulsion.port.fuel.rate' AND ts >= @from AND ts <= @to
+     ORDER BY ts`
+  ).all({ from, to });
+  let total = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const dtH   = (new Date(rows[i].ts) - new Date(rows[i - 1].ts)) / 3600000;
+    const avgMS = (rows[i].value + rows[i - 1].value) / 2;
+    total += avgMS * 3600000 * dtH;
+  }
+  return total > 0 ? +total.toFixed(1) : null;
+}
+
 // ── Liste over turer ──────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
-  const { limit = 20, offset = 0 } = req.query;
+  const { limit = 20, offset = 0, compute_fuel } = req.query;
   const rows = db.prepare(
     `SELECT id,name,start_ts,end_ts,start_lat,start_lon,
             distance_nm,max_speed_kn,avg_speed_kn,
             engine_hours,fuel_used_l,persons,notes
      FROM trips ORDER BY start_ts DESC LIMIT @limit OFFSET @offset`
   ).all({ limit: parseInt(limit), offset: parseInt(offset) });
+
+  // Fyll inn beregnet drivstoff fra sensor-historikk når feltet ikke er logget manuelt
+  if (compute_fuel === '1') {
+    for (const row of rows) {
+      if (row.fuel_used_l != null || !row.start_ts) continue;
+      row.fuel_used_l_calc = computeFuelLiters(row.start_ts, row.end_ts || new Date().toISOString());
+    }
+  }
   res.json({ data: rows });
 });
 
