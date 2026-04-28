@@ -874,13 +874,13 @@ function renderRouterBody(status, cfg, traffic) {
     <div class="rt-charts-row">
       <div class="rt-chart-wrap">
         <div class="rt-chart-title">Mobilsignal · siste 6t</div>
-        <canvas id="rt-signal-chart" height="160"></canvas>
-        <div id="rt-signal-empty" class="rt-chart-empty" hidden>Historikk akkumuleres — grafen oppdateres automatisk.</div>
+        <div id="rt-signal-empty" class="rt-chart-empty">Historikk akkumuleres — grafen oppdateres automatisk.</div>
+        <div id="rt-chart-signal-wrap" class="rt-chart-canvas-wrap" style="display:none"><canvas id="rt-signal-chart"></canvas></div>
       </div>
       <div class="rt-chart-wrap">
         <div class="rt-chart-title">Databruk · siste 6t</div>
-        <canvas id="rt-usage-chart" height="160"></canvas>
-        <div id="rt-usage-empty" class="rt-chart-empty" hidden>Historikk akkumuleres — grafen oppdateres automatisk.</div>
+        <div id="rt-usage-empty" class="rt-chart-empty">Historikk akkumuleres — grafen oppdateres automatisk.</div>
+        <div id="rt-chart-usage-wrap" class="rt-chart-canvas-wrap" style="display:none"><canvas id="rt-usage-chart"></canvas></div>
       </div>
     </div>
 
@@ -1095,20 +1095,17 @@ function stopRouterPolling() {
 
 // ── Router charts ────────────────────────────────────────────────────────────
 
-let _rtCharts = {};
-let _rtChartjsReady = false;
+const _rtCharts = {};
 
 async function ensureChartJSRouter() {
-  if (_rtChartjsReady && window.Chart) return;
-  if (!document.querySelector('script[src*="chart.js"]')) {
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js';
-      s.onload = res; s.onerror = rej;
-      document.head.appendChild(s);
-    });
-  }
-  _rtChartjsReady = true;
+  if (window.Chart) return;
+  await new Promise((res, rej) => {
+    if (document.querySelector('script[src*="chart.js"]')) { res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
 }
 
 async function loadRouterCharts() {
@@ -1124,29 +1121,27 @@ async function loadRouterCharts() {
 
 function renderSignalChart(rows) {
   if (_rtCharts.signal) { _rtCharts.signal.destroy(); delete _rtCharts.signal; }
+  const wrap  = document.getElementById('rt-chart-signal-wrap');
+  const empty = document.getElementById('rt-signal-empty');
   const canvas = document.getElementById('rt-signal-chart');
-  const empty  = document.getElementById('rt-signal-empty');
-  const pts    = rows.filter(r => r.signal_dbm != null);
-  if (!pts.length) {
-    if (canvas) canvas.hidden = true;
-    if (empty)  empty.hidden  = false;
+  const pts   = rows.filter(r => r.signal_dbm != null);
+  if (!pts.length || !canvas || !window.Chart) {
+    if (wrap)  wrap.style.display  = 'none';
+    if (empty) empty.style.display = '';
     return;
   }
-  if (canvas) canvas.hidden = false;
-  if (empty)  empty.hidden  = true;
-  if (!canvas || !window.Chart) return;
-
-  const labels = pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' }));
+  wrap.style.display  = '';
+  empty.style.display = 'none';
 
   _rtCharts.signal = new window.Chart(canvas, {
     type: 'line',
     data: {
-      labels,
+      labels: pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' })),
       datasets: [{
-        label: 'RSSI (dBm)',
+        label: 'RSSI',
         data: pts.map(r => r.signal_dbm),
         borderColor: '#003b7e',
-        backgroundColor: 'rgba(0,59,126,0.07)',
+        backgroundColor: 'rgba(0,59,126,0.08)',
         borderWidth: 1.5,
         fill: true,
         tension: 0.3,
@@ -1155,20 +1150,15 @@ function renderSignalChart(rows) {
       }],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: ctx => `${ctx.raw} dBm` } },
       },
       scales: {
-        x: { ticks: { font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 6, maxRotation: 0 }, grid: { color: '#f0f0f0' } },
-        y: {
-          title: { display: true, text: 'dBm', font: { family: 'Barlow Condensed', size: 9 } },
-          ticks: { font: { family: 'DM Mono', size: 9 } },
-          grid: { color: '#f0f0f0' },
-        },
+        x: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'Barlow Condensed', size: 10 }, maxTicksLimit: 5, maxRotation: 0 } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'DM Mono', size: 10 }, callback: v => v + ' dB' } },
       },
     },
   });
@@ -1176,67 +1166,51 @@ function renderSignalChart(rows) {
 
 function renderUsageChart(rows) {
   if (_rtCharts.usage) { _rtCharts.usage.destroy(); delete _rtCharts.usage; }
+  const wrap  = document.getElementById('rt-chart-usage-wrap');
+  const empty = document.getElementById('rt-usage-empty');
   const canvas = document.getElementById('rt-usage-chart');
-  const empty  = document.getElementById('rt-usage-empty');
-  const pts    = rows.filter(r => r.rx_bytes != null || r.tx_bytes != null);
-  if (!pts.length) {
-    if (canvas) canvas.hidden = true;
-    if (empty)  empty.hidden  = false;
+  const pts   = rows.filter(r => r.rx_bytes != null || r.tx_bytes != null);
+  if (!pts.length || !canvas || !window.Chart) {
+    if (wrap)  wrap.style.display  = 'none';
+    if (empty) empty.style.display = '';
     return;
   }
-  if (canvas) canvas.hidden = false;
-  if (empty)  empty.hidden  = true;
-  if (!canvas || !window.Chart) return;
+  wrap.style.display  = '';
+  empty.style.display = 'none';
 
-  const rx0    = pts[0].rx_bytes ?? 0;
-  const tx0    = pts[0].tx_bytes ?? 0;
-  const toMB   = (bytes, base) => bytes != null ? Math.round((bytes - base) / 1024 / 1024 * 10) / 10 : null;
-  const labels = pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' }));
+  const rx0  = pts[0].rx_bytes ?? 0;
+  const tx0  = pts[0].tx_bytes ?? 0;
+  const toMB = (b, b0) => b != null ? Math.round((b - b0) / 1024 / 1024 * 10) / 10 : null;
 
   _rtCharts.usage = new window.Chart(canvas, {
     type: 'line',
     data: {
-      labels,
+      labels: pts.map(r => new Date(r.ts).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' })),
       datasets: [
         {
           label: '↓ Ned',
           data: pts.map(r => toMB(r.rx_bytes, rx0)),
-          borderColor: '#003b7e',
-          backgroundColor: 'rgba(0,59,126,0.07)',
-          borderWidth: 1.5,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          pointHoverRadius: 3,
+          borderColor: '#003b7e', backgroundColor: 'rgba(0,59,126,0.08)',
+          borderWidth: 1.5, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 3,
         },
         {
           label: '↑ Opp',
           data: pts.map(r => toMB(r.tx_bytes, tx0)),
-          borderColor: '#b86000',
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 0,
-          pointHoverRadius: 3,
+          borderColor: '#b86000', backgroundColor: 'transparent',
+          borderWidth: 1.5, fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 3,
         },
       ],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { font: { family: 'Barlow Condensed', size: 10 }, boxWidth: 10, padding: 8 } },
+        legend: { position: 'top', labels: { font: { family: 'Barlow Condensed', size: 11 }, boxWidth: 10, padding: 8 } },
         tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw} MB` } },
       },
       scales: {
-        x: { ticks: { font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 6, maxRotation: 0 }, grid: { color: '#f0f0f0' } },
-        y: {
-          title: { display: true, text: 'MB', font: { family: 'Barlow Condensed', size: 9 } },
-          ticks: { font: { family: 'DM Mono', size: 9 } },
-          grid: { color: '#f0f0f0' },
-        },
+        x: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'Barlow Condensed', size: 10 }, maxTicksLimit: 5, maxRotation: 0 } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { family: 'DM Mono', size: 10 }, callback: v => v + ' MB' } },
       },
     },
   });
@@ -1428,9 +1402,10 @@ function styles() {
     .rt-ruter-meta strong { color:var(--ink); font-weight:600; }
 
     .rt-charts-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-    .rt-chart-wrap { border:1px solid var(--line); background:var(--white); padding:10px 10px 6px; }
+    .rt-chart-wrap { border:1px solid var(--line); background:var(--white); padding:10px 10px 8px; }
     .rt-chart-title { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); margin-bottom:6px; }
-    .rt-chart-empty { font-size:11px; color:var(--ink-light); font-style:italic; text-align:center; padding:20px 0; }
+    .rt-chart-empty { font-size:11px; color:var(--ink-light); font-style:italic; text-align:center; padding:16px 0; }
+    .rt-chart-canvas-wrap { position:relative; height:160px; }
 
     .rt-meta { text-align:right; font-size:10px; color:var(--ink-light); margin-top:10px; font-style:italic; }
     .rt-clients { border:1px solid var(--line); background:var(--white); }
