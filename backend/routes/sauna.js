@@ -32,11 +32,13 @@ const BOOKING_GROUPS = {
 // De fire badstuene vi viser. Booking-URL bygges per manifest mot dens
 // tilhørende booking-gruppe — Periode-app-en åpner alltid på dato.
 const SAUNAS = [
-  { id: 'S65MTAATSDzH1QpspfQn', name: 'Drømmeren', kind: 'Privat', groupId: BOOKING_GROUPS.privatBystranda, sortKey: 1 },
-  { id: 'dIJcPbrfsFZ09StavEm2', name: 'Drømmeren', kind: 'Felles', groupId: BOOKING_GROUPS.fellesBystranda, sortKey: 2 },
-  { id: '2puco5bimBtW2rwoVrDx', name: 'Oksøy',     kind: 'Privat', groupId: BOOKING_GROUPS.privatBystranda, sortKey: 3 },
-  { id: 'BRXOrhpwIsm4boW2ZSK8', name: 'Oksøy',     kind: 'Felles', groupId: BOOKING_GROUPS.fellesBystranda, sortKey: 4 },
+  { id: 'BRXOrhpwIsm4boW2ZSK8', name: 'Oksøy',     kind: 'Felles', groupId: BOOKING_GROUPS.fellesBystranda, sortKey: 1 },
+  { id: 'S65MTAATSDzH1QpspfQn', name: 'Drømmeren', kind: 'Privat', groupId: BOOKING_GROUPS.privatBystranda, sortKey: 2 },
+  { id: 'dIJcPbrfsFZ09StavEm2', name: 'Drømmeren', kind: 'Felles', groupId: BOOKING_GROUPS.fellesBystranda, sortKey: 3 },
+  { id: '2puco5bimBtW2rwoVrDx', name: 'Oksøy',     kind: 'Privat', groupId: BOOKING_GROUPS.privatBystranda, sortKey: 4 },
 ];
+
+const MEMBER_DISCOUNT = 0.5;   // vi er medlemmer — halv pris
 
 const SLOT_TTL_MS     = 60 * 1000;       // 60s — folk booker fortløpende
 const MANIFEST_TTL_MS = 24 * 3600_000;   // 24t — navn/pris/kapasitet endrer seg sjelden
@@ -220,7 +222,7 @@ router.get('/week', async (req, res) => {
 
     const saunas = SAUNAS.map((s, i) => {
       const m = manifests[i] || {};
-      const priceNok = m.priceOre ? Math.round(m.priceOre / 100) : null;
+      const priceNok = m.priceOre ? Math.round(m.priceOre / 100 * MEMBER_DISCOUNT) : null;
       const dayList  = dates.map(date => {
         const slots = (slotMap.get(s.id) || new Map()).get(date) || [];
         const enriched = slots.map(slot => {

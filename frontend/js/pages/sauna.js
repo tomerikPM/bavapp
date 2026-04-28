@@ -228,7 +228,7 @@ function renderSauna(s, today) {
         </div>
         <div>
           <div class="sauna-hd-price">${escapeHtml(priceTxt)}</div>
-          <div class="sauna-hd-price-sub">per time</div>
+          <div class="sauna-hd-price-sub">per time · medlem</div>
         </div>
       </div>
       ${body}

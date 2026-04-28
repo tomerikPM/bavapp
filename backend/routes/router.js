@@ -241,7 +241,13 @@ router.get('/status', async (req, res) => {
       .map(i => ({ ...i, _source: classifyInterface(i) }));
 
     const order = { cellular: 1, wifi: 2, wan: 3 };
-    candidates.sort((a, b) => (order[a._source] || 9) - (order[b._source] || 9));
+    candidates.sort((a, b) => {
+      const oa = order[a._source] || 9;
+      const ob = order[b._source] || 9;
+      if (oa !== ob) return oa - ob;
+      // Within same type: prefer interfaces that have an IPv4 address
+      return (hasIp4(b) ? 1 : 0) - (hasIp4(a) ? 1 : 0);
+    });
 
     const wan = candidates[0] || null;
     const wanSource = wan?._source ?? 'none';
@@ -294,7 +300,8 @@ router.get('/status', async (req, res) => {
         rsrp:        mod.rsrp ?? null,
         rsrq:        mod.rsrq ?? null,
         operator:    mod.operator ?? mod.operator_name ?? mod.network_name ?? null,
-        networkType: mod.network_type ?? mod.connection_type ?? mod.mode ?? null,
+        networkType: mod.network_type ?? mod.connection_type ?? mod.mode ?? mod.type
+                  ?? (mod.band ? (mod.band.match(/^(LTE|4G|5G|NR|3G|UMTS|HSPA\+?|2G|GSM)/i)?.[0] ?? null) : null),
         band:        mod.band ?? null,
         cellId:      mod.cell_id ?? mod.cellid ?? null,
         imei:        mod.imei ?? null,
