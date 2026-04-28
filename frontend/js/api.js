@@ -22,19 +22,20 @@ export function setConfig(key, val) {
 }
 export function getConfig() { return { ...CFG }; }
 
-async function req(url, options = {}) {
+async function req(url, options = {}, timeout = 8000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = timeout ? setTimeout(() => controller.abort(new Error('Forespørselen tok for lang tid')), timeout) : null;
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `HTTP ${res.status}`);
     }
     return res.json();
   } catch (e) {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error(e.cause?.message || 'Forespørselen tok for lang tid (timeout)');
     throw e;
   }
 }
@@ -59,7 +60,7 @@ export const docs = {
   get:    (id)          => req(b(`/docs/${id}`)),
   update: (id, data)    => req(b(`/docs/${id}`), patch(data)),
   delete: (id)          => req(b(`/docs/${id}`), del()),
-  upload: (formData)    => req(b('/docs'), { method: 'POST', body: formData }),
+  upload: (formData)    => req(b('/docs'), { method: 'POST', body: formData }, 60000),
 };
 
 export const parts = {
