@@ -17,6 +17,13 @@ const SPD_STEP    = 0.5;    // knop per bucket
 const MATCH_WIN   = 45000;  // ms: maks tidsdiff for å matche readings (45 sek)
 const MIN_SAMPLES = 3;      // minimum målinger per bucket
 
+// Fartsregimer for Bavaria Sport 32 / D6 330:
+// - Deplassement: opp til hull-fart (~7.7 kn teoretisk), dropper i L/nm med fart
+// - Hump: 10–20 kn — skroget pløyer, dyrest per nm
+// - Plan: ≥ 20 kn — skroget løftes, L/nm faller igjen
+const SPD_LOW_MAX   = 10;
+const SPD_PLANE_MIN = 20;
+
 // Binærsøk etter nærmeste element innen tidsvindaet
 function findNearest(sorted, targetMs, field) {
   let lo = 0, hi = sorted.length - 1;
@@ -80,7 +87,13 @@ router.get('/', (req, res) => {
     }
 
     if (!points.length) {
-      return res.json({ from, to, sample_count: 0, rpm_buckets: [], speed_buckets: [], optimal_rpm: null, optimal_speed: null });
+      return res.json({
+        from, to, sample_count: 0,
+        rpm_buckets: [], speed_buckets: [],
+        optimal_low: null, optimal_plane: null,
+        optimal_rpm_low: null, optimal_rpm_plane: null,
+        regimes: { low_max: SPD_LOW_MAX, plane_min: SPD_PLANE_MIN },
+      });
     }
 
     // RPM-buckets
@@ -98,6 +111,9 @@ router.get('/', (req, res) => {
         const avg_lph = v.lph_sum / v.n;
         const avg_kn  = v.kn_sum  / v.n;
         const avg_lnm = avg_kn >= 0.5 ? avg_lph / avg_kn : null;
+        const regime  = avg_kn <= SPD_LOW_MAX ? 'low'
+                      : avg_kn >= SPD_PLANE_MIN ? 'plane'
+                      : 'hump';
         return {
           rpm_min: +key,
           rpm_max: +key + RPM_STEP,
@@ -106,6 +122,7 @@ router.get('/', (req, res) => {
           avg_kn:  Math.round(avg_kn  * 10) / 10,
           avg_lnm: avg_lnm != null ? Math.round(avg_lnm * 100) / 100 : null,
           samples: v.n,
+          regime,
         };
       })
       .sort((a, b) => a.rpm_min - b.rpm_min);
@@ -125,6 +142,9 @@ router.get('/', (req, res) => {
         const kn_mid  = +key + SPD_STEP / 2;
         const avg_lph = v.lph_sum / v.n;
         const avg_lnm = avg_lph / kn_mid;
+        const regime  = kn_mid <= SPD_LOW_MAX ? 'low'
+                      : kn_mid >= SPD_PLANE_MIN ? 'plane'
+                      : 'hump';
         return {
           speed_min: +key,
           speed_max: +key + SPD_STEP,
@@ -132,22 +152,35 @@ router.get('/', (req, res) => {
           avg_lph:   Math.round(avg_lph * 10) / 10,
           avg_lnm:   Math.round(avg_lnm * 100) / 100,
           samples:   v.n,
+          regime,
         };
       })
       .sort((a, b) => a.speed_min - b.speed_min);
 
-    // Optimalt RPM: lavest L/nm ved fart ≥ 3 kn og ≥ 5 målinger
-    const validRpm = rpm_buckets.filter(b => b.avg_lnm != null && b.avg_kn >= 3 && b.samples >= 5);
-    const optimal_rpm = validRpm.length
-      ? validRpm.reduce((best, b) => b.avg_lnm < best.avg_lnm ? b : best)
-      : null;
+    // Finn beste fartsbøtte i hvert regime (lavest L/nm, krev minst 5 målinger)
+    const pickBestSpd = regime => {
+      const cand = speed_buckets.filter(b => b.regime === regime && b.samples >= 5);
+      return cand.length ? cand.reduce((best, b) => b.avg_lnm < best.avg_lnm ? b : best) : null;
+    };
+    const optimal_low   = pickBestSpd('low');
+    const optimal_plane = pickBestSpd('plane');
 
-    const validSpd = speed_buckets.filter(b => b.samples >= 5);
-    const optimal_speed = validSpd.length
-      ? validSpd.reduce((best, b) => b.avg_lnm < best.avg_lnm ? b : best)
-      : null;
+    // Beste RPM-band per regime — sammen med optimal fart blir dette en konkret anbefaling
+    const pickBestRpm = regime => {
+      const cand = rpm_buckets.filter(b => b.regime === regime && b.avg_lnm != null && b.samples >= 5);
+      return cand.length ? cand.reduce((best, b) => b.avg_lnm < best.avg_lnm ? b : best) : null;
+    };
+    const optimal_rpm_low   = pickBestRpm('low');
+    const optimal_rpm_plane = pickBestRpm('plane');
 
-    res.json({ from, to, sample_count: points.length, rpm_buckets, speed_buckets, optimal_rpm, optimal_speed });
+    res.json({
+      from, to,
+      sample_count: points.length,
+      rpm_buckets, speed_buckets,
+      optimal_low, optimal_plane,
+      optimal_rpm_low, optimal_rpm_plane,
+      regimes: { low_max: SPD_LOW_MAX, plane_min: SPD_PLANE_MIN },
+    });
   } catch (err) {
     console.error('[efficiency]', err);
     res.status(500).json({ error: err.message });

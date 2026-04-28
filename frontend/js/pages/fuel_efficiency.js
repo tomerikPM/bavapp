@@ -38,6 +38,7 @@ export async function render(container) {
     </div>
 
     <div id="eff-summary" style="display:none;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px"></div>
+    <div id="eff-regime-help" style="display:none;font-size:11px;color:var(--ink-light);margin:-8px 0 14px;line-height:1.5"></div>
 
     <div class="page-tabs" style="margin-bottom:0">
       <button class="page-tab active" data-tab="rpm">⚙ RPM-kurve</button>
@@ -94,6 +95,12 @@ export async function render(container) {
     .eff-summary-value { font-family:'DM Mono','Courier New',monospace;font-size:1.5rem;font-weight:700;color:var(--ink);line-height:1.1; }
     .eff-summary-sub { font-size:11px;color:var(--ink-light);margin-top:3px; }
     .eff-summary-card.optimal { border-top:3px solid var(--ok); }
+    .eff-summary-card.hump    { border-top:3px solid var(--warn); }
+    .eff-regime-pill { display:inline-block;font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;margin-left:6px;vertical-align:middle;border:1px solid currentColor; }
+    .eff-regime-low   { color:#003b7e; }
+    .eff-regime-plane { color:var(--ok); }
+    .eff-regime-hump  { color:var(--warn); }
+    .eff-table tr.hump td { color:var(--warn); }
 
     .eff-chart-card { background:var(--white);border:1px solid var(--line);overflow:hidden; }
     .eff-chart-head { padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
@@ -186,25 +193,38 @@ function renderSummary(data) {
   const el = document.getElementById('eff-summary');
   el.style.display = 'grid';
 
-  const or  = data.optimal_rpm;
-  const os  = data.optimal_speed;
+  const ol  = data.optimal_low;
+  const op  = data.optimal_plane;
+  const orl = data.optimal_rpm_low;
+  const orp = data.optimal_rpm_plane;
+  const reg = data.regimes || { low_max: 10, plane_min: 20 };
+
+  const card = (title, spd, rpm, sub) => `
+    <div class="eff-summary-card optimal">
+      <div class="eff-summary-label">${title}</div>
+      <div class="eff-summary-value">${spd ? `${spd.speed_mid.toFixed(1)} kn` : '—'}</div>
+      <div class="eff-summary-sub">${spd
+        ? `${spd.avg_lnm} L/nm · ${spd.avg_lph} L/h${rpm ? ` · ${rpm.rpm_min}–${rpm.rpm_max} RPM` : ''}`
+        : (sub || 'Trenger mer data')}</div>
+    </div>`;
 
   el.innerHTML = `
-    <div class="eff-summary-card optimal">
-      <div class="eff-summary-label">Optimalt RPM</div>
-      <div class="eff-summary-value">${or ? `${or.rpm_min}–${or.rpm_max}` : '—'}</div>
-      <div class="eff-summary-sub">${or ? `${or.avg_lnm} L/nm · ${or.avg_lph} L/h · snitt ${or.avg_kn} kn` : 'Trenger mer data'}</div>
-    </div>
-    <div class="eff-summary-card optimal">
-      <div class="eff-summary-label">Optimal fart</div>
-      <div class="eff-summary-value">${os ? `${os.speed_mid.toFixed(1)} kn` : '—'}</div>
-      <div class="eff-summary-sub">${os ? `${os.avg_lnm} L/nm · ${os.avg_lph} L/h` : 'Trenger mer data'}</div>
-    </div>
+    ${card(`Lav fart (≤ ${reg.low_max} kn)`, ol, orl)}
+    ${card(`I plan (≥ ${reg.plane_min} kn)`, op, orp)}
     <div class="eff-summary-card">
       <div class="eff-summary-label">Datapunkter</div>
       <div class="eff-summary-value">${data.sample_count.toLocaleString('no')}</div>
       <div class="eff-summary-sub">${data.rpm_buckets.length} RPM-band · ${data.speed_buckets.length} fartsbånd</div>
     </div>`;
+
+  const help = document.getElementById('eff-regime-help');
+  if (help) {
+    help.style.display = '';
+    help.innerHTML = `
+      <span class="eff-regime-pill eff-regime-low">Lav fart</span> deplassement, skroget pløyer ikke ·
+      <span class="eff-regime-pill eff-regime-hump">${reg.low_max}–${reg.plane_min} kn</span> "humpen" — dyrest L/nm, unngås ·
+      <span class="eff-regime-pill eff-regime-plane">I plan</span> skroget løftes, L/nm faller igjen`;
+  }
 }
 
 function renderRpmChart(data) {
@@ -213,12 +233,20 @@ function renderRpmChart(data) {
   if (!canvas || !window.Chart) return;
 
   const buckets   = data.rpm_buckets;
-  const optRpm    = data.optimal_rpm?.rpm_min;
+  const optLow    = data.optimal_rpm_low?.rpm_min;
+  const optPlane  = data.optimal_rpm_plane?.rpm_min;
+  const isOpt     = b => b.rpm_min === optLow || b.rpm_min === optPlane;
+  const regimeBg  = b => b.regime === 'hump' ? '#b8600033'
+                       : b.regime === 'plane' ? '#003b7e33'
+                       : '#1a704033';
+  const regimeFg  = b => b.regime === 'hump' ? '#b86000'
+                       : b.regime === 'plane' ? '#003b7e'
+                       : '#1a7040';
   const labels    = buckets.map(b => `${b.rpm_min}`);
   const lphVals   = buckets.map(b => b.avg_lph);
   const lnmVals   = buckets.map(b => b.avg_lnm);
-  const barColors = buckets.map(b => b.rpm_min === optRpm ? '#1a7040' : '#003b7e33');
-  const barBorder = buckets.map(b => b.rpm_min === optRpm ? '#1a7040' : '#003b7e');
+  const barColors = buckets.map(b => isOpt(b) ? '#1a7040' : regimeBg(b));
+  const barBorder = buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b));
 
   _charts['rpm'] = new window.Chart(canvas, {
     data: {
@@ -240,7 +268,7 @@ function renderRpmChart(data) {
           data: lnmVals,
           borderColor: '#b86000',
           backgroundColor: 'transparent',
-          pointBackgroundColor: buckets.map(b => b.rpm_min === optRpm ? '#1a7040' : '#b86000'),
+          pointBackgroundColor: buckets.map(b => isOpt(b) ? '#1a7040' : '#b86000'),
           pointRadius: 4,
           tension: 0.3,
           yAxisID: 'yLnm',
@@ -292,15 +320,20 @@ function renderRpmChart(data) {
   // Tabell
   const table = document.getElementById('eff-rpm-table');
   if (!table) return;
+  const regLabel = r => r === 'hump' ? 'Hump' : r === 'plane' ? 'Plan' : 'Lav';
+  const optBadge = b => b.rpm_min === optLow   ? '<span class="badge-opt">Best lav</span>'
+                      : b.rpm_min === optPlane ? '<span class="badge-opt">Best plan</span>'
+                      : '';
   table.innerHTML = `
     <table class="eff-table">
       <thead><tr>
-        <th>RPM-band</th><th>L/h</th><th>L/nm</th><th>Snitt kn</th><th>Målinger</th>
+        <th>RPM-band</th><th>Regime</th><th>L/h</th><th>L/nm</th><th>Snitt kn</th><th>Målinger</th>
       </tr></thead>
       <tbody>
         ${buckets.filter(b => b.avg_lnm != null).map(b => `
-          <tr class="${b.rpm_min === optRpm ? 'optimal' : ''}">
-            <td>${b.rpm_min}–${b.rpm_max}${b.rpm_min === optRpm ? '<span class="badge-opt">Optimal</span>' : ''}</td>
+          <tr class="${isOpt(b) ? 'optimal' : (b.regime === 'hump' ? 'hump' : '')}">
+            <td>${b.rpm_min}–${b.rpm_max}${optBadge(b)}</td>
+            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span></td>
             <td>${b.avg_lph.toFixed(1)}</td>
             <td>${b.avg_lnm.toFixed(2)}</td>
             <td>${b.avg_kn.toFixed(1)}</td>
@@ -316,12 +349,20 @@ function renderSpdChart(data) {
   if (!canvas || !window.Chart) return;
 
   const buckets   = data.speed_buckets;
-  const optSpd    = data.optimal_speed?.speed_min;
+  const optLow    = data.optimal_low?.speed_min;
+  const optPlane  = data.optimal_plane?.speed_min;
+  const isOpt     = b => b.speed_min === optLow || b.speed_min === optPlane;
+  const regimeBg  = b => b.regime === 'hump' ? '#b8600033'
+                       : b.regime === 'plane' ? '#003b7e33'
+                       : '#1a704033';
+  const regimeFg  = b => b.regime === 'hump' ? '#b86000'
+                       : b.regime === 'plane' ? '#003b7e'
+                       : '#1a7040';
   const labels    = buckets.map(b => b.speed_mid.toFixed(1));
   const lphVals   = buckets.map(b => b.avg_lph);
   const lnmVals   = buckets.map(b => b.avg_lnm);
-  const barColors = buckets.map(b => b.speed_min === optSpd ? '#1a7040' : '#b0102033');
-  const barBorder = buckets.map(b => b.speed_min === optSpd ? '#1a7040' : '#b01020');
+  const barColors = buckets.map(b => isOpt(b) ? '#1a7040' : regimeBg(b));
+  const barBorder = buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b));
 
   _charts['spd'] = new window.Chart(canvas, {
     data: {
@@ -343,7 +384,7 @@ function renderSpdChart(data) {
           data: lnmVals,
           borderColor: '#003b7e',
           backgroundColor: 'transparent',
-          pointBackgroundColor: buckets.map(b => b.speed_min === optSpd ? '#1a7040' : '#003b7e'),
+          pointBackgroundColor: buckets.map(b => isOpt(b) ? '#1a7040' : regimeFg(b)),
           pointRadius: 4,
           tension: 0.3,
           yAxisID: 'yLnm',
@@ -391,15 +432,20 @@ function renderSpdChart(data) {
   // Tabell
   const table = document.getElementById('eff-spd-table');
   if (!table) return;
+  const regLabel = r => r === 'hump' ? 'Hump' : r === 'plane' ? 'Plan' : 'Lav';
+  const optBadge = b => b.speed_min === optLow   ? '<span class="badge-opt">Best lav</span>'
+                      : b.speed_min === optPlane ? '<span class="badge-opt">Best plan</span>'
+                      : '';
   table.innerHTML = `
     <table class="eff-table">
       <thead><tr>
-        <th>Fart</th><th>L/h</th><th>L/nm</th><th>Målinger</th>
+        <th>Fart</th><th>Regime</th><th>L/h</th><th>L/nm</th><th>Målinger</th>
       </tr></thead>
       <tbody>
         ${buckets.map(b => `
-          <tr class="${b.speed_min === optSpd ? 'optimal' : ''}">
-            <td>${b.speed_mid.toFixed(1)} kn${b.speed_min === optSpd ? '<span class="badge-opt">Optimal</span>' : ''}</td>
+          <tr class="${isOpt(b) ? 'optimal' : (b.regime === 'hump' ? 'hump' : '')}">
+            <td>${b.speed_mid.toFixed(1)} kn${optBadge(b)}</td>
+            <td><span class="eff-regime-pill eff-regime-${b.regime}">${regLabel(b.regime)}</span></td>
             <td>${b.avg_lph.toFixed(1)}</td>
             <td>${b.avg_lnm.toFixed(2)}</td>
             <td>${b.samples}</td>
