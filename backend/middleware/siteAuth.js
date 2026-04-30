@@ -50,14 +50,9 @@ function parseCookies(header) {
 }
 
 function isLoopbackOrLan(req) {
-  const h = (req.hostname || '').toLowerCase();
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
-
-  // req.ip kan ha "::ffff:"-prefix for IPv4-mappet IPv6
+  // NB: 127.0.0.1 / ::1 bypasses ikke — Tailscale Funnel proxer fra loopback.
+  // Auth gjelder for Funnel og Tailscale (100.x); kun ekte private LAN-IPs slipper unna.
   const ip = (req.ip || '').replace(/^::ffff:/, '');
-  if (ip === '127.0.0.1' || ip === '::1') return true;
-
-  // Private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16
   if (/^10\./.test(ip))             return true;
   if (/^192\.168\./.test(ip))       return true;
   if (/^169\.254\./.test(ip))       return true;
