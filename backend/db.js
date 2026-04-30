@@ -131,6 +131,25 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_router_history_ts ON router_history(ts DESC);
 
+  CREATE TABLE IF NOT EXISTS device_traffic_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    mac        TEXT NOT NULL,
+    hostname   TEXT,
+    ip         TEXT,
+    rx_packets INTEGER,
+    tx_packets INTEGER,
+    signal_dbm INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_device_traffic_ts  ON device_traffic_history(ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_device_traffic_mac ON device_traffic_history(mac, ts DESC);
+
+  CREATE TABLE IF NOT EXISTS device_aliases (
+    mac        TEXT PRIMARY KEY,
+    alias      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+  );
+
   CREATE TABLE IF NOT EXISTS diag_events (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL,

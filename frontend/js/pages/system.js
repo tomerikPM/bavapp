@@ -664,13 +664,20 @@ async function renderRouterTab(panel) {
       <label class="cl-toggle"><input type="checkbox" id="rt-autorefresh" checked> Auto-oppdater (30 s)</label>
     </div>
 
-    <div id="rt-sms-form" class="rt-form" hidden>
-      <div class="cl-form-grid">
-        <input  id="rt-sms-number"  placeholder="Mottakernummer (+47…)" class="cl-form-input">
-        <input  id="rt-sms-message" placeholder="Meldingstekst"          class="cl-form-input">
+    <div id="rt-sms-form" class="rt-sms-compose" hidden>
+      <div class="rt-sms-compose-row">
+        <label class="rt-sms-lbl">Til</label>
+        <input id="rt-sms-number" class="rt-sms-input" placeholder="+47 …" type="tel" autocomplete="tel">
       </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn-primary"   id="rt-sms-send"   style="font-size:11px;padding:8px 14px">Send</button>
+      <div class="rt-sms-compose-row">
+        <label class="rt-sms-lbl">Melding</label>
+        <div class="rt-sms-textarea-wrap">
+          <textarea id="rt-sms-message" class="rt-sms-textarea" placeholder="Skriv melding…" rows="3" maxlength="160"></textarea>
+          <span class="rt-sms-counter" id="rt-sms-counter">0/160</span>
+        </div>
+      </div>
+      <div class="rt-sms-compose-foot">
+        <button class="btn-primary"   id="rt-sms-send"   style="font-size:11px;padding:8px 18px">Send</button>
         <button class="btn-secondary" id="rt-sms-cancel" style="font-size:11px;padding:7px 12px">Avbryt</button>
       </div>
     </div>
@@ -689,6 +696,11 @@ async function renderRouterTab(panel) {
     document.getElementById('rt-sms-form').hidden = true;
   });
   document.getElementById('rt-sms-send').addEventListener('click', doRouterSms);
+  document.getElementById('rt-sms-message').addEventListener('input', (e) => {
+    const n = e.target.value.length;
+    const el = document.getElementById('rt-sms-counter');
+    if (el) { el.textContent = `${n}/160`; el.style.color = n > 140 ? 'var(--warn)' : 'var(--ink-light)'; }
+  });
   document.getElementById('rt-autorefresh').addEventListener('change', (e) => {
     if (e.target.checked) startRouterPolling();
     else                  stopRouterPolling();
@@ -714,6 +726,7 @@ async function loadRouterStatus() {
       loadWifiClients();
       loadSmsInbox();
       loadRouterCharts();
+      loadDeviceTraffic();
       document.getElementById('rt-debug-btn')?.addEventListener('click', loadRouterDebug);
     }
   } catch (e) {
@@ -885,6 +898,7 @@ function renderRouterBody(status, cfg, traffic) {
     </div>
 
     <div id="rt-clients-wrap" style="margin-top:16px"></div>
+    <div id="rt-devices-wrap" style="margin-top:16px"></div>
     ${!status.hasSim ? `
       <div class="cl-version-header" style="margin-top:20px">SMS-innboks</div>
       <div class="rt-clients-empty">Ingen SIM-kort installert.</div>
@@ -944,16 +958,159 @@ async function loadWifiClients() {
       <div class="cl-version-header">WiFi-klienter${count ? ' (' + count + ')' : ''}</div>
       ${!count ? '<div class="rt-clients-empty">Ingen tilkoblet.</div>' : `
       <div class="rt-clients">
-        ${clients.map(c => `
+        ${clients.map(c => {
+          const display = c.hostname || c.ip || (c.mac ? c.mac.toUpperCase() : '?');
+          const sub     = (c.hostname && c.ip) ? c.ip : (c.hostname && !c.ip ? '' : '');
+          const sig     = c.signal;
+          const sigBars = sig == null ? '—'
+            : sig >= -60 ? '▂▄▆█'
+            : sig >= -70 ? '▂▄▆<span style="opacity:.3">█</span>'
+            : sig >= -80 ? '▂▄<span style="opacity:.3">▆█</span>'
+            : '▂<span style="opacity:.3">▄▆█</span>';
+          const sigColor = sig == null ? 'var(--ink-light)'
+            : sig >= -70 ? 'var(--ok)' : sig >= -85 ? 'var(--warn)' : 'var(--danger)';
+          return `
           <div class="rt-client">
-            <span class="rt-client-mac">${escapeHtml(c.mac || c.bssid || '?')}</span>
-            <span class="rt-client-signal">${c.signal != null ? c.signal + ' dBm' : '—'}</span>
-          </div>
-        `).join('')}
+            <div class="rt-client-name">
+              <span class="rt-client-host">${escapeHtml(display)}</span>
+              ${sub ? `<span class="rt-client-ip">${escapeHtml(sub)}</span>` : ''}
+            </div>
+            <span class="rt-client-signal" style="color:${sigColor}">${sigBars}${sig != null ? ' ' + sig + ' dBm' : ''}</span>
+          </div>`;
+        }).join('')}
       </div>`}
     `;
   } catch {
     /* stille feil — ikke blokker hovedvisning */
+  }
+}
+
+let _deviceTrafficHours = 24;
+
+async function loadDeviceTraffic() {
+  const wrap = document.getElementById('rt-devices-wrap');
+  if (!wrap) return;
+  try {
+    const r = await fetch(`${BASE()}/api/router/devices?hours=${_deviceTrafficHours}`);
+    if (!r.ok) return;
+    const { rows = [] } = await r.json();
+
+    // Pakke-fordeling, ikke bytes — vi kan bare vise relativ andel
+    const total = rows.reduce((a, r) => a + (r.rx_packets || 0) + (r.tx_packets || 0), 0);
+    const fmtPkts = n => {
+      if (n == null) return '—';
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+      return String(n);
+    };
+    const labelFor = (h) =>
+      h === 1   ? 'siste time'
+      : h === 6 ? 'siste 6t'
+      : h === 24 ? 'siste døgn'
+      : h === 72 ? 'siste 3 døgn'
+      : h === 168 ? 'siste uke'
+      : `siste ${h}t`;
+
+    const head = `
+      <div class="cl-version-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span>Trafikkfordeling · ${labelFor(_deviceTrafficHours)}</span>
+        <span class="rt-dev-range" id="rt-dev-range">
+          ${[1, 6, 24, 72, 168].map(h =>
+            `<button class="rt-dev-range-btn ${h === _deviceTrafficHours ? 'active' : ''}" data-h="${h}">${h < 24 ? h + 't' : (h / 24) + 'd'}</button>`
+          ).join('')}
+        </span>
+      </div>
+    `;
+
+    if (!rows.length || total === 0) {
+      wrap.innerHTML = `
+        ${head}
+        <div class="rt-clients-empty">
+          Historikk akkumuleres — RUT200 logges hvert 2. minutt. Velg lengre vindu eller vent litt.
+        </div>
+        <div class="rt-dev-note">Pakker (ikke bytes) per WiFi-assosiering. God indikator på <em>relativ</em> bruk, men én videostream gir færre store pakker enn mange små chat-pakker.</div>
+      `;
+    } else {
+      const top = rows.slice(0, 8);
+      wrap.innerHTML = `
+        ${head}
+        <div class="rt-devices">
+          ${top.map(r => {
+            const sum = (r.rx_packets || 0) + (r.tx_packets || 0);
+            const pct = total ? Math.round(sum / total * 1000) / 10 : 0;
+            const display = r.alias || r.hostname || (r.mac || '').toLowerCase();
+            // Sub-linje: vis hostname hvis alias finnes, ellers IP/MAC
+            const subParts = [];
+            if (r.alias && r.hostname) subParts.push(r.hostname);
+            if (r.ip) subParts.push(r.ip);
+            if (!r.hostname && !r.ip && r.mac) subParts.push(r.mac);
+            const sub = subParts.join(' · ');
+            return `
+              <div class="rt-device" data-mac="${escapeHtml(r.mac || '')}" data-alias="${escapeHtml(r.alias || '')}">
+                <div class="rt-device-row">
+                  <span class="rt-device-name">
+                    ${escapeHtml(display)}
+                    <button class="rt-device-edit" title="Rediger navn">rediger</button>
+                  </span>
+                  <span class="rt-device-pct">${pct.toFixed(1)} %</span>
+                </div>
+                <div class="rt-device-bar"><div class="rt-device-bar-fill" style="width:${pct}%"></div></div>
+                <div class="rt-device-meta">
+                  ${sub ? `<span>${escapeHtml(sub)}</span>` : ''}
+                  <span>↓ ${fmtPkts(r.rx_packets)} pakker</span>
+                  <span>↑ ${fmtPkts(r.tx_packets)} pakker</span>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+        <div class="rt-dev-note">
+          Pakker (ikke bytes) per WiFi-assosiering — relativ fordeling.
+          Total ${fmtPkts(total)} pakker fra ${rows.length} ${rows.length === 1 ? 'enhet' : 'enheter'}.
+        </div>
+      `;
+    }
+
+    // Hook up range-buttons
+    wrap.querySelectorAll('.rt-dev-range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _deviceTrafficHours = parseInt(btn.dataset.h, 10);
+        loadDeviceTraffic();
+      });
+    });
+
+    // Hook up alias-edit-buttons
+    wrap.querySelectorAll('.rt-device-edit').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const dev   = btn.closest('.rt-device');
+        const mac   = dev?.dataset.mac;
+        const cur   = dev?.dataset.alias || '';
+        if (!mac) return;
+        const next = prompt(`Navn for ${mac}\n(blank for å fjerne)`, cur);
+        if (next === null) return;  // avbrutt
+        const trimmed = next.trim();
+        try {
+          if (trimmed === '') {
+            await fetch(`${BASE()}/api/router/aliases/${encodeURIComponent(mac)}`, { method: 'DELETE' });
+          } else {
+            const r = await fetch(`${BASE()}/api/router/aliases/${encodeURIComponent(mac)}`, {
+              method:  'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify({ alias: trimmed }),
+            });
+            if (!r.ok) {
+              const err = await r.json().catch(() => ({}));
+              throw new Error(err.error || `HTTP ${r.status}`);
+            }
+          }
+          loadDeviceTraffic();
+        } catch (e) {
+          alert('Kunne ikke lagre: ' + e.message);
+        }
+      });
+    });
+  } catch {
+    /* stille feil */
   }
 }
 
@@ -1072,6 +1229,8 @@ async function doRouterSms() {
       document.getElementById('rt-sms-number').value  = '';
       document.getElementById('rt-sms-message').value = '';
       document.getElementById('rt-sms-form').hidden   = true;
+    } else if (d.hint) {
+      alert(d.error + '\n\n' + d.hint);
     } else {
       alert('Feil: ' + (d.error || 'ukjent'));
     }
@@ -1425,11 +1584,30 @@ function styles() {
 
     .rt-meta { text-align:right; font-size:10px; color:var(--ink-light); margin-top:10px; font-style:italic; }
     .rt-clients { border:1px solid var(--line); background:var(--white); }
-    .rt-client { display:flex; justify-content:space-between; padding:6px 12px; border-bottom:1px solid var(--line); font-size:12px; }
+    .rt-client { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; border-bottom:1px solid var(--line); font-size:12px; gap:8px; }
     .rt-client:last-child { border-bottom:none; }
-    .rt-client-mac { font-family:'DM Mono',monospace; }
-    .rt-client-signal { color:var(--ink-light); }
+    .rt-client-name { flex:1; min-width:0; }
+    .rt-client-host { font-family:'DM Mono',monospace; font-weight:500; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .rt-client-ip { font-size:10px; color:var(--ink-light); display:block; font-family:'DM Mono',monospace; }
+    .rt-client-signal { font-family:'DM Mono',monospace; font-size:11px; white-space:nowrap; }
     .rt-clients-empty { padding:12px; background:var(--surface); border:1px solid var(--line); font-size:12px; color:var(--ink-light); text-align:center; font-style:italic; }
+
+    /* ── Trafikkfordeling per enhet ── */
+    .rt-dev-range { display:inline-flex; gap:2px; }
+    .rt-dev-range-btn { background:none; border:1px solid var(--line); font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.05em; padding:2px 8px; cursor:pointer; color:var(--ink-light); }
+    .rt-dev-range-btn:hover { color:var(--blue); }
+    .rt-dev-range-btn.active { background:var(--blue); color:var(--white); border-color:var(--blue); }
+    .rt-devices { display:grid; gap:8px; }
+    .rt-device { padding:8px 10px; background:var(--white); border:1px solid var(--line); }
+    .rt-device-row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+    .rt-device-name { font-family:'DM Mono',monospace; font-size:12px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:8px; min-width:0; }
+    .rt-device-edit { font-family:'DM Mono',monospace; font-size:9px; color:var(--ink-light); background:none; border:none; padding:0; cursor:pointer; opacity:.4; transition:opacity .15s; text-transform:uppercase; letter-spacing:.05em; }
+    .rt-device:hover .rt-device-edit, .rt-device-edit:hover, .rt-device-edit:focus { opacity:1; color:var(--blue); }
+    .rt-device-pct { font-family:'DM Mono',monospace; font-size:12px; color:var(--blue); font-weight:600; white-space:nowrap; }
+    .rt-device-bar { height:4px; background:var(--surface); margin:5px 0; }
+    .rt-device-bar-fill { height:100%; background:var(--blue); }
+    .rt-device-meta { display:flex; gap:12px; font-family:'DM Mono',monospace; font-size:10px; color:var(--ink-light); }
+    .rt-dev-note { margin-top:6px; font-size:10px; color:var(--ink-light); font-style:italic; line-height:1.4; }
 
     /* ── Databruk ── */
     .rt-section { margin-top:16px; }
@@ -1439,6 +1617,18 @@ function styles() {
     .rt-traffic-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-light); }
     .rt-traffic-val { font-family:'DM Mono',monospace; font-size:1.4rem; font-weight:600; color:var(--ink); margin:6px 0 2px; }
     .rt-traffic-sub { font-size:10px; color:var(--ink-light); }
+
+    /* ── SMS compose-form ── */
+    .rt-sms-compose { margin-top:10px; padding:14px; background:var(--white); border:1px solid var(--line); }
+    .rt-sms-compose-row { display:grid; grid-template-columns:40px 1fr; gap:8px; align-items:start; margin-bottom:10px; }
+    .rt-sms-lbl { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); padding-top:9px; }
+    .rt-sms-input { width:100%; padding:7px 10px; border:1px solid var(--line); background:var(--surface); font-family:'DM Mono',monospace; font-size:13px; color:var(--ink); box-sizing:border-box; }
+    .rt-sms-input:focus { outline:none; border-color:var(--blue); }
+    .rt-sms-textarea-wrap { position:relative; }
+    .rt-sms-textarea { width:100%; padding:7px 10px; border:1px solid var(--line); background:var(--surface); font-family:inherit; font-size:13px; color:var(--ink); resize:vertical; box-sizing:border-box; line-height:1.5; }
+    .rt-sms-textarea:focus { outline:none; border-color:var(--blue); }
+    .rt-sms-counter { position:absolute; bottom:6px; right:8px; font-family:'DM Mono',monospace; font-size:10px; color:var(--ink-light); pointer-events:none; }
+    .rt-sms-compose-foot { display:flex; gap:8px; margin-top:4px; }
 
     /* ── SMS-innboks ── */
     .rt-sms-loading { padding:12px; font-size:12px; color:var(--ink-light); }

@@ -31,18 +31,21 @@ const ROUTER_TLS  = process.env.ROUTER_TLS  !== '0';   // default på siden RutO
 
 const TOKEN_TTL_MS = 270_000;  // RutOS-token utløper etter ~5 min; fornye innen 4:30
 
-let _token    = null;
-let _tokenExp = 0;
+let _token       = null;
+let _tokenExp    = 0;
+let _cookieToken = null;   // verdi fra Set-Cookie etter login (kan avvike fra JSON-body)
 
 // ── Lavnivå HTTP ────────────────────────────────────────────────────────────
 
-function httpJson(method, path, { token, body, timeoutMs = 8000 } = {}) {
+// skipCsrf=true brukes på login-kallet — X-Csrf-Protection endrer login-responsen
+function httpJson(method, path, { token, body, timeoutMs = 8000, skipCsrf = false } = {}) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
     const lib  = ROUTER_TLS ? https : http;
     const headers = { 'Accept': 'application/json' };
     if (data)  { headers['Content-Type']   = 'application/json'; headers['Content-Length'] = data.length; }
-    if (token) { headers['Authorization']  = `Bearer ${token}`; }
+    if (token) { headers['Authorization']  = `Bearer ${token}`; headers['Cookie'] = `token=${_cookieToken || token}`; }
+    if (method !== 'GET' && method !== 'HEAD' && !skipCsrf) { headers['X-Csrf-Protection'] = '1'; }
 
     const req = lib.request({
       host: ROUTER_IP,
@@ -53,6 +56,12 @@ function httpJson(method, path, { token, body, timeoutMs = 8000 } = {}) {
       rejectUnauthorized: false,
       timeout: timeoutMs,
     }, res => {
+      // Fang Set-Cookie fra login-respons — token kan komme hit istedenfor i JSON-body
+      const setCookies = res.headers['set-cookie'] || [];
+      for (const c of setCookies) {
+        const m = /^token=([^;]+)/.exec(c);
+        if (m) { _cookieToken = m[1]; break; }
+      }
       const chunks = [];
       res.on('data', d => chunks.push(d));
       res.on('end',  () => {
@@ -82,9 +91,11 @@ async function getToken() {
 
   const resp = await httpJson('POST', '/api/login', {
     body: { username: ROUTER_USER, password: ROUTER_PASS },
+    skipCsrf: true,   // ikke send X-Csrf-Protection på login — endrer responsformatet
   });
-  // RutOS svarer typisk { success:true, data:{ username, token, expires } }
-  const token = resp?.data?.token || resp?.ubus_rpc_session;
+  // RutOS 7.x: token enten i data.token (eldre) eller kun i Set-Cookie (nyere)
+  // _cookieToken er allerede satt av httpJson via Set-Cookie-headeren
+  const token = resp?.data?.token || resp?.ubus_rpc_session || _cookieToken;
   if (!token) throw new Error('Ingen token i login-respons: ' + JSON.stringify(resp).slice(0,200));
   _token    = token;
   _tokenExp = Date.now() + TOKEN_TTL_MS;
@@ -111,7 +122,7 @@ async function apiPost(path, body) {
   try {
     return await httpJson('POST', path, { token, body });
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
+    if (e.status === 401) {  // 401 = token utløpt; 403 = permanent tillatelsessjekk — ikke retry
       _token = null;
       const t2 = await getToken();
       return httpJson('POST', path, { token: t2, body });
@@ -363,15 +374,28 @@ router.post('/sms', async (req, res) => {
   const { number, message } = req.body || {};
   if (!number || !message) return res.status(400).json({ error: 'number + message påkrevd' });
   try {
-    // RutOS-stier varierer mellom firmware-versjoner
     const candidates = [
-      { path: '/api/messages/actions/send',                 body: { number, text: message } },
-      { path: '/api/sms/actions/send',                      body: { number, message } },
-      { path: '/api/modems/0/sms/actions/send',             body: { number, message } },
+      // RutOS 7.x bekreftet format (fra nettverkslogg)
+      { path: '/api/messages/actions/send', body: { data: { modem: '1-1', number, message } } },
+      // Fallback-varianter
+      { path: '/api/messages/actions/send', body: { modem: '1-1', number, message } },
+      { path: '/api/messages',              body: { modem_id: '1-1', number, message } },
+      { path: '/api/sms/send',              body: { modem: '1-1', number, message } },
     ];
+    let got403 = false;
     for (const c of candidates) {
-      try { const r = await apiPost(c.path, c.body); return res.json({ ok: true, result: r, _path: c.path }); }
-      catch (e) { if (e.status !== 404) { /* prøv neste likevel */ } }
+      try {
+        const r = await apiPost(c.path, c.body);
+        return res.json({ ok: true, result: r, _path: c.path });
+      } catch (e) {
+        if (e.status === 403) got403 = true;
+      }
+    }
+    if (got403) {
+      return res.status(403).json({
+        error: 'SMS-API er ikke aktivert på ruteren.',
+        hint: 'Gå til RutOS-webgrensesnittet → Services → Mobile Utilities → Messages, og aktiver "Remote configuration / API access".',
+      });
     }
     res.status(502).json({ error: 'Fant ingen SMS-send endepunkt på denne RutOS-versjonen' });
   } catch (e) {
@@ -383,7 +407,6 @@ router.post('/sms', async (req, res) => {
 router.get('/wifi-clients', async (req, res) => {
   if (!ROUTER_PASS) return res.status(503).json({ error: 'ROUTER_PASS ikke satt' });
   try {
-    // RutOS 7.x: assoclist ligger nested i interfaces/status, ikke devices/status
     const data = await tryGet([
       '/api/wireless/interfaces/status',
       '/api/wireless/devices/status',
@@ -395,15 +418,29 @@ router.get('/wifi-clients', async (req, res) => {
     const clients = [];
 
     for (const item of all) {
-      // Format A: interface-objekt med nested assoclist/stations/clients
-      const nested = item.stations || item.assoclist || item.clients || item.associated || [];
-      if (nested.length) {
-        for (const s of nested) clients.push(s);
+      // Format A: interface-objekt med 'clients'-array (RutOS 7.x primærformat)
+      if (Array.isArray(item.clients) && item.clients.length) {
+        for (const c of item.clients) clients.push(normaliseClient(c));
         continue;
       }
-      // Format B: item er selve klienten (har mac-adresse)
-      if (item.mac || item.bssid || item.station) {
-        clients.push(item);
+      if (Array.isArray(item.stations) && item.stations.length) {
+        for (const c of item.stations) clients.push(normaliseClient(c));
+        continue;
+      }
+      if (Array.isArray(item.associated) && item.associated.length) {
+        for (const c of item.associated) clients.push(normaliseClient(c));
+        continue;
+      }
+      // Format A2: assoclist som objekt { MAC: {...} }
+      if (item.assoclist && typeof item.assoclist === 'object' && !Array.isArray(item.assoclist)) {
+        for (const [mac, info] of Object.entries(item.assoclist)) {
+          clients.push(normaliseClient({ macaddr: mac, mac, ...info }));
+        }
+        continue;
+      }
+      // Format B: item er selve klienten
+      if (item.macaddr || item.mac || item.bssid || item.station) {
+        clients.push(normaliseClient(item));
       }
     }
 
@@ -412,6 +449,30 @@ router.get('/wifi-clients', async (req, res) => {
     res.status(502).json({ error: e.message });
   }
 });
+
+function normaliseClient(c) {
+  const mac    = c.macaddr || c.mac || c.bssid || c.station || null;
+  const sigRaw = c.signal ?? null;
+  const signal = sigRaw == null ? null
+    : typeof sigRaw === 'string' ? parseInt(sigRaw, 10) || null
+    : sigRaw;
+  return {
+    mac,
+    hostname: c.hostname || c.name || null,
+    ip:       c.ipaddr   || c.ip   || null,
+    signal,
+    band:     c.band     || null,
+    rxRate:   c.rx_rate  || null,
+    txRate:   c.tx_rate  || null,
+  };
+}
+
+function isWanIface(i) {
+  const id    = (i.id || i.interface || i.name || '').toLowerCase();
+  const proto = (i.proto || i.protocol || '').toLowerCase();
+  return id.startsWith('mob') || id.startsWith('wan') || id === 'wwan' ||
+    ['wwan', '3g', '4g', 'lte', 'qmi', 'ncm', 'modemmanager'].includes(proto);
+}
 
 // GET /api/router/traffic
 router.get('/traffic', async (req, res) => {
@@ -422,11 +483,7 @@ router.get('/traffic', async (req, res) => {
       '/api/network/interfaces/status',
     ]);
     const ifaces = pickFirstArray(data.data, data, data.interfaces);
-    // Velg WAN-interfacet
-    const wan = ifaces.find(i => {
-      const id = (i.id || i.interface || i.name || '').toLowerCase();
-      return id.startsWith('mob') || id === 'wan' || id === 'wwan';
-    });
+    const wan = ifaces.find(isWanIface);
     const stats = wan?.statistics || wan?.stats || {};
     res.json({
       ifname:     wan?.id || wan?.interface || wan?.name || null,
@@ -445,9 +502,10 @@ router.get('/sms-inbox', async (req, res) => {
   if (!ROUTER_PASS) return res.status(503).json({ error: 'ROUTER_PASS ikke satt' });
   try {
     const data = await tryGet([
-      '/api/messages',
+      '/api/messages',                  // RutOS 7.x bekreftet (cookie-auth)
+      '/api/modems/1-1/messages',
+      '/api/modems/1-1/sms/messages',
       '/api/sms/messages',
-      '/api/modems/0/sms/messages',
     ]);
     if (data?._error) return res.status(502).json({ error: data._error, tried: data._tried });
     const messages = pickFirstArray(data.data, data, data.messages, data.sms);
@@ -478,6 +536,185 @@ router.get('/history', (req, res) => {
     'SELECT ts, signal_dbm, rx_bytes, tx_bytes FROM router_history WHERE ts >= ? ORDER BY ts ASC'
   ).all(since);
   res.json({ rows, hours });
+});
+
+// GET /api/router/devices — pakke-fordeling per LAN-klient over et vindu.
+// Vi lagrer kumulative tx/rx_packets per assoc og regner deltaer på spørringstid.
+// Når en klient reasocierer hopper telleren tilbake — da teller vi gjeldende verdi
+// som "delta", siden alt før resetten allerede er telt med fra forrige periode.
+router.get('/devices', (req, res) => {
+  const hours = Math.min(168, Math.max(1, parseInt(req.query.hours || '24', 10)));
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const rows = db.prepare(`
+    WITH ordered AS (
+      SELECT ts, mac, rx_packets, tx_packets,
+             LAG(rx_packets) OVER (PARTITION BY mac ORDER BY ts) AS prev_rx,
+             LAG(tx_packets) OVER (PARTITION BY mac ORDER BY ts) AS prev_tx
+      FROM device_traffic_history
+      WHERE ts >= ?
+    ),
+    deltas AS (
+      SELECT mac,
+             CASE WHEN prev_rx IS NULL OR rx_packets < prev_rx THEN rx_packets
+                  ELSE rx_packets - prev_rx END AS d_rx,
+             CASE WHEN prev_tx IS NULL OR tx_packets < prev_tx THEN tx_packets
+                  ELSE tx_packets - prev_tx END AS d_tx
+      FROM ordered
+    )
+    SELECT d.mac,
+           (SELECT alias FROM device_aliases WHERE mac = d.mac) AS alias,
+           (SELECT hostname FROM device_traffic_history
+              WHERE mac = d.mac AND hostname IS NOT NULL
+              ORDER BY ts DESC LIMIT 1) AS hostname,
+           (SELECT ip FROM device_traffic_history
+              WHERE mac = d.mac AND ip IS NOT NULL
+              ORDER BY ts DESC LIMIT 1) AS ip,
+           SUM(d_rx) AS rx_packets,
+           SUM(d_tx) AS tx_packets,
+           COUNT(*)  AS samples,
+           (SELECT MAX(ts) FROM device_traffic_history WHERE mac = d.mac) AS last_seen
+    FROM deltas d
+    GROUP BY d.mac
+    ORDER BY (SUM(d_rx) + SUM(d_tx)) DESC
+  `).all(since);
+  res.json({ rows, hours });
+});
+
+// GET /api/router/devices/recent?minutes=60 — anslått MB/time per enhet siste vindu.
+// Kombinerer per-klient pakke-deltaer med totale WAN-byte-deltaer for å estimere bytes
+// per enhet (vi har ikke direkte byte-tellere per klient — se TRINN 2 i CLAUDE.md).
+//
+// Statusterskler kan settes via env (defaults gjenspeiler 28/4-spike-en):
+//   TRAFFIC_WARN_MB_PER_HOUR=500
+//   TRAFFIC_ALERT_MB_PER_HOUR=1500
+const WARN_MB_H  = parseInt(process.env.TRAFFIC_WARN_MB_PER_HOUR  || '500',  10);
+const ALERT_MB_H = parseInt(process.env.TRAFFIC_ALERT_MB_PER_HOUR || '1500', 10);
+
+router.get('/devices/recent', (req, res) => {
+  const minutes = Math.min(360, Math.max(5, parseInt(req.query.minutes || '60', 10)));
+  const since   = new Date(Date.now() - minutes * 60_000).toISOString();
+
+  // Pakke-deltaer per MAC i vinduet (samme håndtering av reassoc som /devices)
+  const macRows = db.prepare(`
+    WITH ordered AS (
+      SELECT ts, mac, rx_packets, tx_packets,
+             LAG(rx_packets) OVER (PARTITION BY mac ORDER BY ts) AS prev_rx,
+             LAG(tx_packets) OVER (PARTITION BY mac ORDER BY ts) AS prev_tx
+      FROM device_traffic_history
+      WHERE ts >= ?
+    ),
+    deltas AS (
+      SELECT mac,
+             CASE WHEN prev_rx IS NULL OR rx_packets < prev_rx THEN rx_packets
+                  ELSE rx_packets - prev_rx END AS d_rx,
+             CASE WHEN prev_tx IS NULL OR tx_packets < prev_tx THEN tx_packets
+                  ELSE tx_packets - prev_tx END AS d_tx
+      FROM ordered
+    )
+    SELECT d.mac,
+           (SELECT alias FROM device_aliases WHERE mac = d.mac) AS alias,
+           (SELECT hostname FROM device_traffic_history
+              WHERE mac = d.mac AND hostname IS NOT NULL
+              ORDER BY ts DESC LIMIT 1) AS hostname,
+           (SELECT ip FROM device_traffic_history
+              WHERE mac = d.mac AND ip IS NOT NULL
+              ORDER BY ts DESC LIMIT 1) AS ip,
+           SUM(d_rx) AS rx_packets,
+           SUM(d_tx) AS tx_packets,
+           COUNT(*)  AS samples
+    FROM deltas d
+    GROUP BY d.mac
+  `).all(since);
+
+  // Total WAN-bytes-delta i samme vindu (router_history er kumulativ — MAX-MIN er en
+  // god nok proxy. Kan undervurdere ved router-reboot mellom samples, men tregheter er
+  // tolererbar siden vi bare bruker den til byte-per-pakke-estimat.)
+  const totals = db.prepare(`
+    SELECT MIN(rx_bytes) AS rx_min, MAX(rx_bytes) AS rx_max,
+           MIN(tx_bytes) AS tx_min, MAX(tx_bytes) AS tx_max
+    FROM router_history WHERE ts >= ? AND rx_bytes IS NOT NULL
+  `).get(since);
+
+  const totalBytes = (totals && totals.rx_max != null)
+    ? Math.max(0, (totals.rx_max - totals.rx_min) + (totals.tx_max - totals.tx_min))
+    : 0;
+  const totalPackets = macRows.reduce((a, r) => a + (r.rx_packets || 0) + (r.tx_packets || 0), 0);
+  const bytesPerPacket = totalPackets > 0 ? totalBytes / totalPackets : 0;
+
+  const hoursWindow = minutes / 60;
+  const enriched = macRows
+    .map(r => {
+      const pkts  = (r.rx_packets || 0) + (r.tx_packets || 0);
+      const bytes = Math.round(pkts * bytesPerPacket);
+      const mbPerHour = hoursWindow > 0 ? (bytes / 1024 / 1024) / hoursWindow : 0;
+      let status = 'ok';
+      if (mbPerHour >= ALERT_MB_H) status = 'alert';
+      else if (mbPerHour >= WARN_MB_H) status = 'warn';
+      return {
+        mac: r.mac, alias: r.alias, hostname: r.hostname, ip: r.ip,
+        rx_packets: r.rx_packets, tx_packets: r.tx_packets,
+        est_bytes: bytes,
+        est_mb_per_hour: Math.round(mbPerHour * 10) / 10,
+        status,
+      };
+    })
+    .sort((a, b) => b.est_bytes - a.est_bytes);
+
+  // Total mobil-bruk i vinduet (ekte, ikke estimat)
+  const wanRxMB = totals && totals.rx_max != null ? Math.round((totals.rx_max - totals.rx_min) / 1024 / 1024 * 10) / 10 : null;
+  const wanTxMB = totals && totals.tx_max != null ? Math.round((totals.tx_max - totals.tx_min) / 1024 / 1024 * 10) / 10 : null;
+
+  // Worst-case status for hele vinduet
+  const worstStatus = enriched.find(d => d.status === 'alert') ? 'alert'
+                    : enriched.find(d => d.status === 'warn')  ? 'warn'
+                    : 'ok';
+  const topDevice = enriched[0] || null;
+
+  res.json({
+    minutes,
+    bytes_per_packet: Math.round(bytesPerPacket * 10) / 10,
+    wan_rx_mb: wanRxMB,
+    wan_tx_mb: wanTxMB,
+    thresholds: { warn_mb_per_hour: WARN_MB_H, alert_mb_per_hour: ALERT_MB_H },
+    status: worstStatus,
+    top: topDevice,
+    devices: enriched,
+  });
+});
+
+// ── Device aliases ────────────────────────────────────────────────────────
+// Brukerdefinerte navn per MAC ("Tom Eriks MacBook" etc.) som overstyrer
+// hostname i UI-visninger. Lagres lokalt i SQLite, ikke avhengig av RUT200.
+
+function normaliseMac(mac) {
+  if (!mac || typeof mac !== 'string') return null;
+  const cleaned = mac.trim().toUpperCase().replace(/-/g, ':');
+  return /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(cleaned) ? cleaned : null;
+}
+
+router.get('/aliases', (req, res) => {
+  const rows = db.prepare('SELECT mac, alias, updated_at FROM device_aliases ORDER BY alias').all();
+  res.json({ rows });
+});
+
+router.put('/aliases/:mac', (req, res) => {
+  const mac = normaliseMac(req.params.mac);
+  if (!mac) return res.status(400).json({ error: 'Ugyldig MAC-adresse' });
+  const alias = (req.body?.alias || '').toString().trim();
+  if (!alias) return res.status(400).json({ error: 'alias påkrevd' });
+  if (alias.length > 60) return res.status(400).json({ error: 'alias maks 60 tegn' });
+  db.prepare(`
+    INSERT INTO device_aliases (mac, alias, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    ON CONFLICT(mac) DO UPDATE SET alias = excluded.alias, updated_at = excluded.updated_at
+  `).run(mac, alias);
+  res.json({ ok: true, mac, alias });
+});
+
+router.delete('/aliases/:mac', (req, res) => {
+  const mac = normaliseMac(req.params.mac);
+  if (!mac) return res.status(400).json({ error: 'Ugyldig MAC-adresse' });
+  const r = db.prepare('DELETE FROM device_aliases WHERE mac = ?').run(mac);
+  res.json({ ok: true, deleted: r.changes });
 });
 
 // GET /api/router/debug — probe alle interessante endepunkter
@@ -515,13 +752,36 @@ const _histInsert = db.prepare(
 const _histPrune = db.prepare(
   "DELETE FROM router_history WHERE ts < datetime('now', '-7 days')"
 );
+const _devInsert = db.prepare(
+  `INSERT INTO device_traffic_history
+     (ts, mac, hostname, ip, rx_packets, tx_packets, signal_dbm)
+   VALUES (?,?,?,?,?,?,?)`
+);
+const _devPrune = db.prepare(
+  "DELETE FROM device_traffic_history WHERE ts < datetime('now', '-30 days')"
+);
+
+function isLanIface(i) {
+  const id = (i.id || i.interface || i.name || '').toLowerCase();
+  return /^lan/.test(id) || id === 'loopback' || id === 'lo';
+}
+
+function extractBytes(obj) {
+  if (!obj) return { rx: null, tx: null };
+  const s = obj.statistics || obj.stats || {};
+  return {
+    rx: s.rx_bytes ?? obj.rx_bytes ?? null,
+    tx: s.tx_bytes ?? obj.tx_bytes ?? null,
+  };
+}
 
 async function recordRouterHistory() {
   if (!ROUTER_PASS) return;
   try {
-    const [modems, ifStatus] = await Promise.allSettled([
+    const [modems, ifStatus, wifiStatus] = await Promise.allSettled([
       tryGet(['/api/modems/status', '/api/mobile/modem/status']),
       tryGet(['/api/interfaces/status', '/api/network/interfaces/status']),
+      tryGet(['/api/wireless/interfaces/status']),
     ]);
 
     const mData  = modems.status === 'fulfilled' ? modems.value : null;
@@ -529,18 +789,83 @@ async function recordRouterHistory() {
     const mod    = mList[0] || null;
     const signal = mod?.signal ?? mod?.rssi ?? null;
 
+    let rxBytes = null, txBytes = null;
+
+    // Kilde 1: WAN-interfacet i interfaces/status (prioritert)
     const ifData = ifStatus.status === 'fulfilled' ? ifStatus.value : null;
     const ifaces = ifData ? pickFirstArray(ifData.data, ifData, ifData.interfaces) : [];
-    const wan    = ifaces.find(i => {
-      const id = (i.id || i.interface || i.name || '').toLowerCase();
-      return id.startsWith('mob') || id === 'wan' || id === 'wwan';
-    });
-    const stats   = wan?.statistics || wan?.stats || {};
-    const rxBytes = stats.rx_bytes ?? null;
-    const txBytes = stats.tx_bytes ?? null;
+    const wan    = ifaces.find(isWanIface);
+    if (wan) {
+      const b = extractBytes(wan);
+      if (b.rx != null) { rxBytes = b.rx; txBytes = b.tx; }
+    }
+    // Fallback: alle ikke-LAN-interface i interfaces/status
+    if (rxBytes == null) {
+      for (const iface of ifaces) {
+        if (isLanIface(iface)) continue;
+        const b = extractBytes(iface);
+        if (b.rx != null) { rxBytes = b.rx; txBytes = b.tx; break; }
+      }
+    }
 
+    // Kilde 2: wireless-interfaces (WiFi-WAN / hotspot)
+    if (rxBytes == null) {
+      const wData  = wifiStatus.status === 'fulfilled' ? wifiStatus.value : null;
+      const wIfaces = wData ? pickFirstArray(wData.data, wData) : [];
+      for (const w of wIfaces) {
+        const b = extractBytes(w);
+        if (b.rx != null) { rxBytes = b.rx; txBytes = b.tx; break; }
+      }
+    }
+
+    // Kilde 3: modem-datakontorer
+    if (rxBytes == null && mod) {
+      const rx = mod.data_rx ?? mod.bytes_received ?? mod.rx_bytes ?? null;
+      const tx = mod.data_tx ?? mod.bytes_sent    ?? mod.tx_bytes ?? null;
+      if (rx != null) { rxBytes = rx; txBytes = tx; }
+    }
+
+    const ts = new Date().toISOString();
     if (signal != null || rxBytes != null) {
-      _histInsert.run(new Date().toISOString(), signal, rxBytes, txBytes);
+      _histInsert.run(ts, signal, rxBytes, txBytes);
+    }
+
+    // Per-klient: kombiner clients[] (som har hostname/ip) med assoclist (pakke-tellere).
+    // assoclist er nøkkel→{tx_packets,rx_packets,signal,...}, clients er liste med matchende macaddr.
+    const wData   = wifiStatus.status === 'fulfilled' ? wifiStatus.value : null;
+    const wIfaces = wData ? pickFirstArray(wData.data, wData) : [];
+    const seen    = new Map();   // mac → { hostname, ip, rx, tx, sig }
+    for (const ap of wIfaces) {
+      const clientList = Array.isArray(ap.clients) ? ap.clients : [];
+      const meta = new Map();
+      for (const c of clientList) {
+        const m = (c.macaddr || c.mac || '').toUpperCase();
+        if (!m) continue;
+        meta.set(m, {
+          hostname: c.hostname || null,
+          ip:       c.ipaddr   || c.ip || null,
+          sig:      typeof c.signal === 'string'
+                      ? parseInt(c.signal, 10) || null
+                      : (c.signal ?? null),
+        });
+      }
+      const assoc = ap.assoclist && typeof ap.assoclist === 'object' ? ap.assoclist : {};
+      for (const [macRaw, info] of Object.entries(assoc)) {
+        const mac = macRaw.toUpperCase();
+        const rx  = info.rx_packets;
+        const tx  = info.tx_packets;
+        if (rx == null && tx == null) continue;
+        const m = meta.get(mac) || {};
+        seen.set(mac, {
+          hostname: m.hostname ?? null,
+          ip:       m.ip ?? null,
+          rx, tx,
+          sig: info.signal ?? m.sig ?? null,
+        });
+      }
+    }
+    for (const [mac, d] of seen) {
+      _devInsert.run(ts, mac, d.hostname, d.ip, d.rx, d.tx, d.sig);
     }
   } catch { /* ruteren kan være utilgjengelig */ }
 }
@@ -548,7 +873,10 @@ async function recordRouterHistory() {
 if (ROUTER_PASS) {
   recordRouterHistory();
   setInterval(recordRouterHistory, 2 * 60_000);
-  setInterval(() => { try { _histPrune.run(); } catch {} }, 3_600_000);
+  setInterval(() => {
+    try { _histPrune.run(); } catch {}
+    try { _devPrune.run();  } catch {}
+  }, 3_600_000);
 }
 
 module.exports = router;
