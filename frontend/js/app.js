@@ -217,6 +217,12 @@ export async function disablePush() {
 
 async function getPushStatus() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'unsupported';
+  if (!window.isSecureContext) return 'insecure';
+  // iOS Safari krever standalone PWA-modus før PushManager er gyldig
+  const ua = navigator.userAgent;
+  const isIOS = /iP(ad|hone|od)/.test(ua);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isIOS && !isStandalone) return 'needs-pwa';
   if (Notification.permission === 'denied') return 'denied';
   const reg = await navigator.serviceWorker.ready.catch(() => null);
   if (!reg) return 'unavailable';
@@ -229,9 +235,12 @@ async function setupPushUI() {
   const info = document.getElementById('cfg-push-info');
   if (!btn || !info) return;
   const update = st => {
+    btn.disabled = false;
     if (st === 'active')       { btn.textContent='Deaktiver varsler'; info.textContent='Push-varsler er aktive'; info.style.color='var(--ok)'; }
-    else if (st === 'denied')  { btn.textContent='Tillatelse blokkert'; btn.disabled=true; info.textContent='Gå til nettleserinnstillinger'; info.style.color='var(--danger)'; }
-    else if (st === 'unsupported') { btn.textContent='Ikke støttet'; btn.disabled=true; info.textContent='Installer fra Safari (iOS 16.4+)'; info.style.color='#bbb'; }
+    else if (st === 'denied')  { btn.textContent='Tillatelse blokkert'; btn.disabled=true; info.textContent='Tillatelse avslått tidligere — gå til iPhone Innstillinger → Bavapp → Varsler for å aktivere igjen'; info.style.color='var(--danger)'; }
+    else if (st === 'insecure') { btn.textContent='Krever HTTPS'; btn.disabled=true; info.innerHTML='Push virker bare over HTTPS. Du bruker en usikker URL. Bytt til Tailscale Funnel-URL-en (https).'; info.style.color='var(--danger)'; }
+    else if (st === 'needs-pwa') { btn.textContent='Installer som PWA først'; btn.disabled=true; info.innerHTML='På iPhone må Bavapp være lagt til hjemmeskjermen før push virker.<br>Trykk <strong>Del</strong> → <strong>Legg til på Hjem-skjerm</strong>. Åpne så fra ikonet på hjemmeskjermen.'; info.style.color='var(--warn)'; }
+    else if (st === 'unsupported') { btn.textContent='Ikke støttet'; btn.disabled=true; info.textContent='Nettleseren støtter ikke Web Push. Bruk Safari på iOS 16.4+ eller Chrome/Firefox på desktop.'; info.style.color='#bbb'; }
     else { btn.textContent='Aktiver varsler'; info.textContent='Motta push-varsler ved bilgepumpe, lav batteri og motoralarmer.'; info.style.color='#bbb'; }
   };
   update(await getPushStatus());

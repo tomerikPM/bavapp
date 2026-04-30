@@ -54,15 +54,36 @@ router.delete('/subscribe', (req, res) => {
 // ── Test-push (kun i utvikling) ───────────────────────────────────────────────
 router.post('/test', async (req, res) => {
   try {
+    const subs = db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get();
+    if (!subs.n) {
+      return res.status(404).json({
+        error: 'Ingen abonnenter registrert',
+        hint: 'Åpne Bavapp som PWA på iPhone (HTTPS-URL via Tailscale Funnel) og trykk "Aktiver varsler" i Innstillinger.',
+        subscribers: 0,
+      });
+    }
     await push.pushCritical(
       'Bavaria Sport 32 — Test',
       'Push-varsler fungerer! ⛵',
       '/#events'
     );
-    res.json({ ok: true });
+    res.json({ ok: true, subscribers: subs.n });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Diagnostikk: status for push-oppsettet ────────────────────────────────────
+router.get('/status', (req, res) => {
+  const hasVapid = !!push.getVapidPublicKey();
+  const subs = db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get();
+  res.json({
+    vapid_configured: hasVapid,
+    subscribers:      subs.n,
+    requires_https:   true,
+    ios_requires_pwa: true,
+    notes: 'iOS Safari krever PWA-installasjon (Hjem-skjerm) og HTTPS for å motta push.',
+  });
 });
 
 // ── Liste over abonnenter (debug) ─────────────────────────────────────────────
