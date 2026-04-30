@@ -2,17 +2,15 @@
 # sync-to-cerbo.sh — deploy Bavapp til Cerbo GX (Venus OS Large)
 #
 # Bruk:
-#   ./sync-to-cerbo.sh
+#   ./sync-to-cerbo.sh                         # på båt-LAN (default 192.168.1.237)
+#   CERBO_HOST=root@10.0.0.50 ./sync-to-cerbo.sh
 #
 # Ber om SSH-passord 2-3 ganger (uten ssh-key). Sett opp ssh-key med
-# `ssh-copy-id root@<cerbo-ip>` for å unngå.
-#
-# Override host:
-#   CERBO_HOST=root@10.0.0.50 ./sync-to-cerbo.sh
+# `ssh-copy-id root@192.168.1.237` for å unngå.
 
 set -e
 
-CERBO_HOST="${CERBO_HOST:-root@cerbo}"
+CERBO_HOST="${CERBO_HOST:-root@192.168.1.237}"
 APP_DIR="/data/bavapp"
 
 cd "$(dirname "$0")"
@@ -88,5 +86,6 @@ ssh "$CERBO_HOST" "
 
 echo ""
 echo "✓ Deploy ferdig."
-echo "  http://cerbo:3001 (Bavapp via Tailscale, eller http://192.168.1.237:3001 på båt-LAN)"
+echo "  https://bavapp.summermylife.no (offentlig via Cloudflare Tunnel)"
+echo "  http://192.168.1.237:3001 (direkte på båt-LAN)"
 echo "  Logger: ssh $CERBO_HOST tail -f /var/log/bavapp/current"

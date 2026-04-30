@@ -57,8 +57,15 @@
 - **RUT200 RutOS 7.x bruker REST-API på `/api`, IKKE legacy `/ubus` JSON-RPC** — uhttpd er konfigurert med `-l /api -L /www/cgi-bin/api_dispatcher.lua`. Selv om `JSON-RPC support`-pakken er installert eksponerer ikke uhttpd `/ubus`-endepunktet. Auth: `POST /api/login {username,password}` → Bearer-token (utløper etter ~5 min). Brukes i `backend/routes/router.js`. Krever `ROUTER_TLS=1` (HTTP-redirect til HTTPS uten body). Standard kalleliste: `/api/system/device/status` (board-info, ikke uptime), `/api/interfaces/status` (alle interfaces), `/api/modems/status` (SIM/signal), `/api/wireless/interfaces/status` (SSID). Uptime henter vi fra LAN-interface som proxy.
 - **iPhone Personal Hotspot-deteksjon**: når RUT200 er klient mot iPhonen, dukker den aktive uplinken opp som interface `wan1` på `wlan0-2` med proto `dhcp` og IP fra `172.20.10.0/28`-subnettet (Apples faste hotspot-subnet).
 
+### Cloudflare Tunnel (installert april 2026)
+- `cloudflared` ARM-binær under `/data/cloudflared/`, daemontools-service `/service/cloudflared`, persistens via `/data/rcS.local`
+- Token i `/data/cloudflared/.env` (TUNNEL_TOKEN). Tunnel-ID: `9d1da5f5-2b36-416f-979b-b05f78a36281`, navn `cerbo`
+- Public hostname: `bavapp.summermylife.no` → `HTTP localhost:3001`
+- Setup-script: `setup-cloudflared.sh` (krever `cloudflared-token.txt` i repo-roten, gitignored)
+- **Erstatter ngrok og Tailscale Funnel** — Tailscale fjernet helt fra Cerbo april 2026
+
 ### Planlagt / ikke installert
-- Cloudflare Tunnel
+- SSH-via-Cloudflare-tunnel som backup (legg til public hostname `ssh.summermylife.no` → `SSH localhost:22`, bruk `cloudflared access ssh` lokalt)
 - Kystverket fartsgrense-integrasjon (WMS layer_754)
 - Bow thruster status via Cerbo GX digital inputs
 
@@ -74,12 +81,10 @@
 
 ## Åpne tråder (prioritert)
 
-1. **Deploy Bavapp på Cerbo** — SSH fungerer (løst april 2026). Kjør `./sync-to-cerbo.sh`. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
-4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
-5. **Cloudflare Tunnel** — erstatter ngrok (avinstallert april 2026), RUT200 er på plass
-7. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo Node-RED-konfig
-8. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
-9. **Bekreft Cristec-lader-modell** — bilde av typeskilt
+1. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
+2. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo Node-RED-konfig
+3. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
+4. **Bekreft Cristec-lader-modell** — bilde av typeskilt
 
 ## Eksterne ressurser
 

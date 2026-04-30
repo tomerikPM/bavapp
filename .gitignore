@@ -21,3 +21,4 @@ build/
 # diagram-app: kildekoden er i diagram-app/src, dist committes til frontend/diagrams/
 diagram-app/dist/
 diagram-app/node_modules/
+cloudflared-token.txt
