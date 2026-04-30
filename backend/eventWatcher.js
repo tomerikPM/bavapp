@@ -123,13 +123,28 @@ function checkEngine(sk) {
 }
 
 function checkShorepower(sk) {
-  const shore = sk['electrical.ac.shore.available'] ?? false;
-  if (shore === _prev.shorepower) return;
+  const shore = inferShore(sk);
+  if (shore == null || shore === _prev.shorepower) return;
   if (shore)
     fire('shore_on',  'electrical', 'Landstrøm tilkoblet', '230V AC · lading startet', 'info',  'shore');
   else
     fire('shore_off', 'electrical', 'Landstrøm frakoblet', 'Byttet til batteri',        'warn',  'shore');
   _prev.shorepower = shore;
+}
+
+// Cerbo har ingen direkte shore-detect — utled fra LiFePO4-signatur.
+// Holdes synkron med SK.get.shorepower() i frontend/js/signalk.js.
+function inferShore(sk) {
+  const explicit = sk['electrical.ac.shore.available'];
+  if (explicit != null) return explicit;
+  const cur  = sk['electrical.batteries.279.current'];
+  const volt = sk['electrical.batteries.279.voltage'];
+  const rpm  = (sk['propulsion.port.revolutions'] ?? 0) * 60;
+  if (rpm >= 100) return null;
+  if (cur != null && cur > 0.5) return true;
+  if (volt != null && volt > 13.4 && (cur == null || cur > -2)) return true;
+  if (cur != null && cur < -1) return false;
+  return null;
 }
 
 function checkBattery(sk) {
@@ -213,7 +228,7 @@ function initBaseline(sk) {
   const socRaw = sk['electrical.batteries.279.capacity.stateOfCharge'] ?? null;
   const soc    = socRaw != null ? Math.round(socRaw * 100) : null;
   _prev.engineOn     = rpm > 100 || sk['propulsion.port.state'] === 'started';
-  _prev.shorepower   = sk['electrical.ac.shore.available'] ?? null;
+  _prev.shorepower   = inferShore(sk);
   _prev.soc          = soc;
   _prev.socAlarm     = soc == null ? 'none' : soc <= 20 ? 'low20' : soc <= 30 ? 'low30' : 'none';
   _prev.coolantAlarm = 'ok';
