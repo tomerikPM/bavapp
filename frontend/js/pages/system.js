@@ -904,7 +904,12 @@ function renderRouterBody(status, cfg, traffic) {
       <div class="rt-clients-empty">Ingen SIM-kort installert.</div>
     ` : '<div id="rt-sms-inbox-wrap" style="margin-top:20px"></div>'}
 
-    <div class="rt-meta" style="margin-top:12px">Sist oppdatert ${new Date(status.ts).toLocaleTimeString('no')} · ${escapeHtml(cfg.ip)}${cfg.tls ? ' TLS' : ''}</div>
+    <div class="rt-meta" style="margin-top:12px">
+      ${status.stale
+        ? `<span style="color:var(--warn)">⚠ Siste kjente verdier (${status.staleAgeSec}s siden) — ruteren svarer ikke akkurat nå.</span><br>`
+        : ''}
+      Sist oppdatert ${new Date(status.ts).toLocaleTimeString('no')} · ${escapeHtml(cfg.ip)}${cfg.tls ? ' TLS' : ''}
+    </div>
   `;
 }
 

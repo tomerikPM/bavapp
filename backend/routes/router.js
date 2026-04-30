@@ -38,7 +38,7 @@ let _cookieToken = null;   // verdi fra Set-Cookie etter login (kan avvike fra J
 // ── Lavnivå HTTP ────────────────────────────────────────────────────────────
 
 // skipCsrf=true brukes på login-kallet — X-Csrf-Protection endrer login-responsen
-function httpJson(method, path, { token, body, timeoutMs = 8000, skipCsrf = false } = {}) {
+function httpJson(method, path, { token, body, timeoutMs = 12000, skipCsrf = false } = {}) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
     const lib  = ROUTER_TLS ? https : http;
@@ -197,14 +197,32 @@ router.get('/config', (req, res) => {
   });
 });
 
+// Stale-cache for /status: når et live-kall feiler men vi har en fersk
+// vellykket respons (< STALE_MAX_MS gammel), serverer vi den med stale:true
+// så UI-en slipper å bounce til offline-skjermen ved hver lille timeout.
+let _lastGoodStatus    = null;
+let _lastGoodStatusTs  = 0;
+const STALE_MAX_MS = 3 * 60_000;  // siste kjente status er gyldig i 3 min
+
 // GET /api/router/status — signalstyrke, operatør, WAN-status
 router.get('/status', async (req, res) => {
-  const unreachable = (error) => res.json({
-    reachable: false, error,
-    config: { ip: ROUTER_IP, passSet: !!ROUTER_PASS, tls: ROUTER_TLS },
-  });
+  const serveStaleOrFail = (error) => {
+    const age = Date.now() - _lastGoodStatusTs;
+    if (_lastGoodStatus && age < STALE_MAX_MS) {
+      return res.json({
+        ..._lastGoodStatus,
+        stale:    true,
+        staleAgeSec: Math.round(age / 1000),
+        staleError: error,
+      });
+    }
+    return res.json({
+      reachable: false, error,
+      config: { ip: ROUTER_IP, passSet: !!ROUTER_PASS, tls: ROUTER_TLS },
+    });
+  };
 
-  if (!ROUTER_PASS) return unreachable('ROUTER_PASS ikke satt');
+  if (!ROUTER_PASS) return serveStaleOrFail('ROUTER_PASS ikke satt');
 
   try {
     // system/device/status er "is alive"-prøven — feiler den, er ruteren utilgjengelig
@@ -298,7 +316,7 @@ router.get('/status', async (req, res) => {
                    sysInfo?.data?.uptime  ?? sysInfo?.uptime  ??
                    lanIface?.uptime       ?? null;
 
-    res.json({
+    const payload = {
       reachable:  true,
       uptime,
       hostname:   sysInfo?.data?.static?.hostname ?? sysInfo?.data?.hostname ?? null,
@@ -351,9 +369,12 @@ router.get('/status', async (req, res) => {
           : undefined,
       },
       ts: new Date().toISOString(),
-    });
+    };
+    _lastGoodStatus   = payload;
+    _lastGoodStatusTs = Date.now();
+    res.json(payload);
   } catch (e) {
-    unreachable(e.message);
+    serveStaleOrFail(e.message);
   }
 });
 
