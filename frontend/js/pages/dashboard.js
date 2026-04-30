@@ -33,6 +33,16 @@ export async function render(container) {
       </div>
       <span class="rt-widget-chev">→</span>
     </a>
+    <a href="#system" class="rt-widget rt-traffic-widget" id="dash-traffic" hidden>
+      <div class="rt-widget-main">
+        <span class="rt-widget-icon" id="rt-tr-icon">📊</span>
+        <div class="rt-widget-body">
+          <div class="rt-widget-title" id="rt-tr-title">—</div>
+          <div class="rt-widget-sub"   id="rt-tr-sub"></div>
+        </div>
+      </div>
+      <span class="rt-widget-chev">→</span>
+    </a>
 
     <div class="sl">Prioriterte oppgaver</div>
     <div id="dash-mx"><div class="wx-load"><div class="spin"></div></div></div>
@@ -58,6 +68,9 @@ export async function render(container) {
     .rt-widget.rt-w-fair      { border-left-color:#ffc107; }
     .rt-widget.rt-w-poor      { border-left-color:#ff9800; }
     .rt-widget.rt-w-offline   { border-left-color:#9e9e9e; }
+    .rt-widget.rt-tr-ok       { border-left-color:#4caf50; }
+    .rt-widget.rt-tr-warn     { border-left-color:#b86000; }
+    .rt-widget.rt-tr-alert    { border-left-color:#b01020; }
 
     .fun-card { background: var(--white); border: 1px solid var(--line); padding: 12px 14px; margin: 4px 0; }
     .fun-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -73,6 +86,7 @@ export async function render(container) {
   loadMaintenanceList();
   loadWeatherMini();
   loadRouterWidget();
+  loadTrafficWidget();
 
   const state = SK.getState();
   if (Object.keys(state).length) onSkUpdate(state);
@@ -117,6 +131,51 @@ async function loadRouterWidget() {
     iconEl.textContent = '🔌';
     titleEl.textContent = 'Ruter ikke tilgjengelig';
     subEl.textContent = 'Kan ikke kontakte backend';
+  }
+}
+
+async function loadTrafficWidget() {
+  const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
+  const widget = document.getElementById('dash-traffic');
+  const iconEl = document.getElementById('rt-tr-icon');
+  const titleEl = document.getElementById('rt-tr-title');
+  const subEl = document.getElementById('rt-tr-sub');
+  if (!widget) return;
+
+  try {
+    const r = await fetch(`${BASE}/api/router/devices/recent?minutes=60`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.devices || !d.devices.length) {
+      // Skjul widget hvis vi ikke har noe data ennå (samles opp første time)
+      widget.hidden = true;
+      return;
+    }
+    widget.hidden = false;
+    widget.classList.remove('rt-tr-ok', 'rt-tr-warn', 'rt-tr-alert');
+    widget.classList.add('rt-tr-' + d.status);
+
+    const icon  = d.status === 'alert' ? '⚠️' : d.status === 'warn' ? '⚡' : '📊';
+    const label = d.status === 'alert' ? 'Høyt forbruk'
+                : d.status === 'warn'  ? 'Forhøyet forbruk'
+                : 'Trafikk siste time';
+    iconEl.textContent = icon;
+
+    const top = d.top;
+    const topName = top ? (top.hostname || top.ip || top.mac) : null;
+
+    if (d.status !== 'ok' && top) {
+      titleEl.textContent = `${label}: ${topName} ~${top.est_mb_per_hour} MB/t`;
+    } else if (top && top.est_mb_per_hour > 0) {
+      titleEl.textContent = `${label} · top: ${topName} ~${top.est_mb_per_hour} MB/t`;
+    } else {
+      titleEl.textContent = `${label}: rolig`;
+    }
+
+    const totalMB = (d.wan_rx_mb || 0) + (d.wan_tx_mb || 0);
+    subEl.textContent = `Mobil totalt: ↓${d.wan_rx_mb ?? '—'} MB · ↑${d.wan_tx_mb ?? '—'} MB · ${d.devices.length} enheter`;
+  } catch {
+    document.getElementById('dash-traffic').hidden = true;
   }
 }
 
