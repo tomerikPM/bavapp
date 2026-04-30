@@ -76,7 +76,7 @@
 
 1. **Deploy Bavapp på Cerbo** — SSH fungerer (løst april 2026). Kjør `./sync-to-cerbo.sh`. /data/bavapp/, daemontools-service, ARM-prebuilt better-sqlite3
 4. **Shore power-deteksjon** — krever GX digital input (relé) eller Multi/Quattro-inverter. UI viser "ukjent" inntil videre.
-5. **Cloudflare Tunnel** — erstatt ngrok, RUT200 er nå på plass
+5. **Cloudflare Tunnel** — erstatter ngrok (avinstallert april 2026), RUT200 er på plass
 7. **Webasto W-Bus Node-RED flows** — samtidig med Cerbo Node-RED-konfig
 8. **Kystverket fartsgrense-integrasjon** (WMS layer_754)
 9. **Bekreft Cristec-lader-modell** — bilde av typeskilt

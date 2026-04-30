@@ -12,7 +12,7 @@
 
 set -e
 
-CERBO_HOST="${CERBO_HOST:-root@192.168.1.237}"
+CERBO_HOST="${CERBO_HOST:-root@cerbo}"
 APP_DIR="/data/bavapp"
 
 cd "$(dirname "$0")"
@@ -88,5 +88,5 @@ ssh "$CERBO_HOST" "
 
 echo ""
 echo "✓ Deploy ferdig."
-echo "  http://192.168.1.237:3001 (Bavapp)"
+echo "  http://cerbo:3001 (Bavapp via Tailscale, eller http://192.168.1.237:3001 på båt-LAN)"
 echo "  Logger: ssh $CERBO_HOST tail -f /var/log/bavapp/current"
