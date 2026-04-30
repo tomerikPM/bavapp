@@ -237,9 +237,7 @@ async function showTripTrack(tripId, color, rowEl, tripMeta) {
   _activeTrip = tripId;
 
   // Last inn full tur med track
-  const base = localStorage.getItem('backend_url') || 'http://localhost:3001';
-  const res  = await fetch(`${base}/api/trips/${tripId}`);
-  const trip = await res.json();
+  const trip = await trips.get(tripId);
 
   const track = Array.isArray(trip.track) ? trip.track : [];
 
