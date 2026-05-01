@@ -22,3 +22,4 @@ build/
 diagram-app/dist/
 diagram-app/node_modules/
 cloudflared-token.txt
+snapshot/
