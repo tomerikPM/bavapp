@@ -12,7 +12,6 @@ const PAGES = {
   events:        () => import('./pages/events.js'),
   charts:        () => import('./pages/charts.js'),
   trips:         () => import('./pages/trips.js'),
-  map:           () => import('./pages/map.js'),
   costs:         () => import('./pages/costs.js'),
   scanner:       () => import('./pages/scanner.js'),
   assistant:     () => import('./pages/assistant.js'),
@@ -25,7 +24,10 @@ const PAGES = {
   sauna:         () => import('./pages/sauna.js'),
 };
 
-const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine', 'map'];
+const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine'];
+
+// Bakoverkompatibel ruting: gamle #map-lenker → trips-siden
+const PAGE_ALIASES = { map: 'trips' };
 
 let _currentPage   = null;
 let _currentModule = null;
@@ -97,6 +99,7 @@ function setupNav() {
 }
 
 export async function showPage(id) {
+  if (PAGE_ALIASES[id]) id = PAGE_ALIASES[id];
   if (!PAGES[id]) id = 'dashboard';
   if (_currentModule?.onHide) _currentModule.onHide();
   _currentPage = id;

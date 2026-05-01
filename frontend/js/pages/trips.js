@@ -6,6 +6,7 @@ import { getDieselFunFact } from '../fun.js';
 let _activeTimer = null;
 let _expandedId  = null;
 let _activeTab   = 'trips';
+let _leafletReady = false;
 
 let _chartjsReady = false;
 async function ensureChartJS() {
@@ -30,7 +31,7 @@ export async function render(container) {
     <!-- Faner -->
     <div class="trips-tabs">
       <button class="trips-tab active" id="tab-trips" data-tab="trips">⚓ Turer</button>
-      <button class="trips-tab" id="tab-cv" data-tab="cv">⛵ Sommers CV</button>
+      <button class="trips-tab" id="tab-cv"   data-tab="cv">⛵ Sommers CV</button>
       <button class="trips-tab" id="tab-plan" data-tab="plan">🗺 Planlegger</button>
     </div>
 
@@ -144,6 +145,21 @@ export async function render(container) {
     .trip-chart-body  { padding:4px 6px 6px;height:90px; }
     .trip-funfact { margin-top:12px;padding:10px 12px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--blue);font-size:12px;font-style:italic;color:var(--ink-light); }
     .trip-funfact strong { color:var(--blue);font-style:normal; }
+
+    /* GPS-kart per tur */
+    .trip-map-wrap { position:relative;width:100%;max-width:640px;margin:0 auto; }
+    .trip-map { aspect-ratio:1/1;background:var(--surface);border:1px solid var(--line);position:relative;overflow:hidden; }
+    .trip-map-wrap:fullscreen { max-width:none;width:100vw;height:100vh;background:#000;display:flex;align-items:center;justify-content:center; }
+    .trip-map-wrap:fullscreen .trip-map { aspect-ratio:auto;width:100%;height:100%;border:none; }
+    .trip-map-fs {
+      position:absolute;top:8px;right:8px;z-index:1000;
+      width:34px;height:34px;border:none;border-radius:3px;
+      background:rgba(255,255,255,.92);color:var(--ink);
+      font-size:16px;line-height:1;cursor:pointer;
+      box-shadow:0 1px 4px rgba(0,0,0,.25);
+      display:flex;align-items:center;justify-content:center;
+    }
+    .trip-map-fs:hover { background:#fff; }
 
     /* CV-styles */
     .cv-hero { background:var(--blue);padding:28px 20px;position:relative;overflow:hidden; }
@@ -548,6 +564,18 @@ async function loadTripDetail(tripId) {
         ${miniChartCard(tripId,'cool', 'Kjølevannstemperatur','#b01020')}
         ${miniChartCard(tripId,'soc',  'Batteri SOC',         '#1a7040')}
         ${miniChartCard(tripId,'fuel', 'Forbruk L/h',         '#e65c00')}
+      </div>
+
+      <div class="sl" style="margin:16px 0 8px">GPS-spor</div>
+      <div class="trip-map-wrap" id="trip-map-wrap-${tripId}">
+        <div id="trip-map-${tripId}" class="trip-map">
+          ${Array.isArray(t.track) && t.track.length >= 2
+            ? `<div class="wx-load" style="position:absolute;inset:0;display:flex"><div class="spin"></div>Laster kart…</div>`
+            : `<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:#bbb">Ingen GPS-spor logget for denne turen</div>`}
+        </div>
+        ${Array.isArray(t.track) && t.track.length >= 2
+          ? `<button class="trip-map-fs" id="trip-map-fs-${tripId}" title="Fullskjerm">⛶</button>`
+          : ''}
       </div>`;
 
     await ensureChartJS();
@@ -595,6 +623,10 @@ async function loadTripDetail(tripId) {
         if (bodyEl) bodyEl.innerHTML = '<div style="height:90px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#bbb">Ingen historikkdata</div>';
       }
     }
+
+    if (Array.isArray(t.track) && t.track.length >= 2) {
+      renderTripMap(tripId, t).catch(() => {});
+    }
   } catch(e) {
     const loading = document.getElementById('trip-detail-loading-'+tripId);
     if (loading) loading.innerHTML = `<span style="color:var(--danger)">Feil: ${e.message}</span>`;
@@ -606,4 +638,89 @@ function miniChartCard(tripId,key,title,color) {
   return `<div class="trip-chart-card"><div class="trip-chart-head" style="border-top:2px solid ${color}"><span class="trip-chart-title" style="color:${color}">${title}</span><span class="trip-chart-peak" style="color:${color}" id="tc-${tripId}-${key}-peak">—</span></div><div class="trip-chart-body" id="tc-${tripId}-${key}-body"><canvas id="tc-${tripId}-${key}" style="display:block;width:100%;height:100%"></canvas></div></div>`;
 }
 function fmtTime(iso) { const d=new Date(iso); return d.toLocaleTimeString('no',{hour:'2-digit',minute:'2-digit'}); }
+
+// ── Per-tur GPS-kart ──────────────────────────────────────────────────────────
+const _tripMaps = {};
+
+async function ensureLeaflet() {
+  if (_leafletReady && window.L) return;
+  if (window.L) { _leafletReady = true; return; }
+  if (!document.querySelector('link[href*="leaflet@1.9.4"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+  }
+  await new Promise((res, rej) => {
+    if (document.querySelector('script[src*="leaflet@1.9.4"]')) {
+      const wait = () => window.L ? res() : setTimeout(wait, 50);
+      wait(); return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  _leafletReady = true;
+}
+
+async function renderTripMap(tripId, trip) {
+  await ensureLeaflet();
+  const el = document.getElementById('trip-map-'+tripId);
+  if (!el || !window.L) return;
+  el.innerHTML = '';
+
+  if (_tripMaps[tripId]) { _tripMaps[tripId].remove(); delete _tripMaps[tripId]; }
+
+  const latlngs = trip.track.map(p => [p.lat, p.lon]);
+  const map = window.L.map(el, { zoomControl: true, scrollWheelZoom: false }).setView(latlngs[0], 12);
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap', maxZoom: 19,
+  }).addTo(map);
+
+  const line = window.L.polyline(latlngs, { color:'#003b7e', weight:3, opacity:.9, lineJoin:'round', lineCap:'round' }).addTo(map);
+
+  window.L.marker(latlngs[0], {
+    icon: window.L.divIcon({
+      className: '',
+      html: `<div style="width:12px;height:12px;background:#1a7040;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+      iconSize: [12,12], iconAnchor: [6,6],
+    }),
+  }).addTo(map).bindPopup('<b>Start</b>');
+
+  const endPt = latlngs[latlngs.length-1];
+  const dx = (endPt[0]-latlngs[0][0])**2 + (endPt[1]-latlngs[0][1])**2;
+  if (dx > 1e-7) {
+    window.L.marker(endPt, {
+      icon: window.L.divIcon({
+        className: '',
+        html: `<div style="width:12px;height:12px;background:#b01020;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+        iconSize: [12,12], iconAnchor: [6,6],
+      }),
+    }).addTo(map).bindPopup('<b>Slutt</b>');
+  }
+
+  map.fitBounds(line.getBounds(), { padding: [25, 25], maxZoom: 14 });
+  setTimeout(() => map.invalidateSize(), 100);
+  _tripMaps[tripId] = map;
+
+  const wrap = document.getElementById('trip-map-wrap-'+tripId);
+  const fsBtn = document.getElementById('trip-map-fs-'+tripId);
+  if (wrap && fsBtn) {
+    fsBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (document.fullscreenElement === wrap) document.exitFullscreen();
+      else wrap.requestFullscreen?.().catch(() => {});
+    };
+    const onFsChange = () => {
+      const isFs = document.fullscreenElement === wrap;
+      fsBtn.textContent = isFs ? '⛶ Lukk' : '⛶';
+      setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds(line.getBounds(), { padding: [25, 25], maxZoom: 15 });
+      }, 150);
+    };
+    wrap.addEventListener('fullscreenchange', onFsChange);
+  }
+}
 function setText(id,val) { const el=document.getElementById(id); if(el) el.textContent=val; }
