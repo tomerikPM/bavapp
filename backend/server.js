@@ -99,6 +99,7 @@ app.use('/api/navigate',    require('./routes/navigate'));
 const fuelRoute = require('./routes/fuel');
 app.use('/api/fuel', fuelRoute);
 app.use('/api/fog',          require('./routes/fog'));
+app.use('/api/kystvaer',     require('./routes/kystvaer'));
 app.use('/api/textforecast', require('./routes/textforecast'));
 app.use('/api/features',     require('./routes/features'));
 app.use('/api/router',       require('./routes/router'));

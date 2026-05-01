@@ -144,6 +144,7 @@ export async function render(container) {
     renderFull(container, fc, ocean, sun, lat, lon, place);
     loadTextForecast(lat, lon);
     loadTide(lat, lon);
+    loadKystvaer(lat, lon, fc);
   } catch (e) {
     document.getElementById('wx-full').innerHTML =
       `<div class="wx-load">⚠ Kan ikke hente MET-data: ${e.message}</div>`;
@@ -244,6 +245,162 @@ function renderTide(high, low, station) {
   `;
 }
 
+// Live målt vind fra Kystverkets stasjoner. fc = MET-prognose; brukes til
+// å sammenligne målt vs. prognosert vind for nærmeste stasjon, og flagge
+// hvis avvik er stort (prognose usikker).
+async function loadKystvaer(lat, lon, fc) {
+  const el = document.getElementById('wx-kystvaer');
+  if (!el) return;
+  try {
+    const BASE = localStorage.getItem('backend_url') || 'http://localhost:3001';
+    const r = await fetch(`${BASE}/api/kystvaer?lat=${lat}&lon=${lon}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+
+    // Prognosert vind nå (m/s) for sammenligning
+    const fcWind = Number(fc?.properties?.timeseries?.[0]?.data?.instant?.details?.wind_speed || 0);
+
+    el.innerHTML = renderKystvaer(data, fcWind);
+  } catch (e) {
+    el.innerHTML = `<div class="wx-kv-err">⚠ Kystvær ikke tilgjengelig: ${e.message}</div>`;
+  }
+}
+
+function renderKystvaer(data, fcWind) {
+  const stations = data?.stations || [];
+  if (!stations.length) {
+    return `<div class="wx-kv-err">Ingen stasjoner svarer akkurat nå.</div>`;
+  }
+
+  const fmtAge = s => {
+    if (s == null) return '';
+    if (s < 90)        return 'nå';
+    if (s < 3600)      return `${Math.round(s/60)} min siden`;
+    return `${Math.round(s/3600)} t siden`;
+  };
+
+  // Avvik vs. MET-prognose for nærmeste stasjon
+  const main = stations[0];
+  let diffBadge = '';
+  if (main.wind != null && fcWind > 0) {
+    const diff = main.wind - fcWind;
+    const pct  = Math.abs(diff) / Math.max(fcWind, 1);
+    if (pct > 0.3 && Math.abs(diff) >= 2) {
+      const sign = diff > 0 ? 'sterkere' : 'svakere';
+      const cls  = Math.abs(diff) >= 5 ? 'cr' : 'wn';
+      diffBadge = `<div class="wx-kv-diff ${cls}">⚠ ${Math.abs(diff).toFixed(1)} m/s ${sign} enn prognose (${fcWind.toFixed(1)} m/s)</div>`;
+    } else {
+      diffBadge = `<div class="wx-kv-diff ok">✓ Treffer prognose (${fcWind.toFixed(1)} m/s)</div>`;
+    }
+  }
+
+  const mainBft = main.wind != null ? beaufort(main.wind) : null;
+  const gustFactor = (main.wind > 0 && main.gust > 0) ? main.gust / main.wind : null;
+  const gusty = gustFactor != null && gustFactor >= 1.5;
+
+  const mainCard = `
+    <div class="wx-kv-main${main.stale ? ' wx-kv-stale' : ''}">
+      <div class="wx-kv-head">
+        <div class="wx-kv-name">${main.name}</div>
+        <div class="wx-kv-meta">${main.dist_km} km · ${main.source} · ${fmtAge(main.age_s)}</div>
+      </div>
+      <div class="wx-kv-body">
+        <div class="wx-kv-big">
+          <div class="wx-kv-wind">${main.wind ?? '—'}<sub>m/s</sub></div>
+          <div class="wx-kv-bft">${mainBft != null ? 'Bf ' + mainBft : ''}</div>
+        </div>
+        <div class="wx-kv-arrow" style="transform:rotate(${(main.dir ?? 0) + 180}deg)">↓</div>
+        <div class="wx-kv-dir">
+          <div class="wx-kv-cardinal">${main.dir != null ? windDir(main.dir) : '—'}</div>
+          <div class="wx-kv-deg">${main.dir != null ? main.dir + '°' : ''}</div>
+        </div>
+      </div>
+      <div class="wx-kv-gust ${gusty ? 'wx-kv-gust-warn' : ''}">
+        💨 Kast ${main.gust ?? '—'} m/s${gustFactor ? ` · faktor ${gustFactor.toFixed(1)}` : ''}${gusty ? ' — bygevær' : ''}
+      </div>
+      ${diffBadge}
+    </div>`;
+
+  const others = stations.slice(1).map(s => {
+    const arrow = s.dir != null
+      ? `<span class="wx-kv-row-arrow" style="transform:rotate(${s.dir + 180}deg)">↓</span>`
+      : '';
+    return `
+      <div class="wx-kv-row${s.stale ? ' wx-kv-stale' : ''}">
+        <div class="wx-kv-row-name">${s.name}</div>
+        <div class="wx-kv-row-dist">${s.dist_km} km</div>
+        <div class="wx-kv-row-wind">${s.wind ?? '—'}<small>m/s</small></div>
+        <div class="wx-kv-row-gust">${s.gust != null ? '↗ ' + s.gust : '—'}</div>
+        <div class="wx-kv-row-dir">${arrow} ${s.dir != null ? windDir(s.dir) : '—'}</div>
+        <div class="wx-kv-row-age">${fmtAge(s.age_s)}</div>
+      </div>`;
+  }).join('');
+
+  return `
+    ${mainCard}
+    ${others ? `<div class="wx-kv-others">${others}</div>` : ''}
+    <div class="wx-kv-src">Kilde: Kystverket / MET / Statens vegvesen · oppdatert hvert 5. min</div>
+
+    <style>
+      .wx-kv { margin-bottom:20px; border:1px solid var(--line); background:var(--white); }
+      .wx-kv-loading, .wx-kv-err { padding:14px; font-size:12px; color:var(--ink-light); }
+      .wx-kv-main { padding:14px; border-bottom:1px solid var(--line); }
+      .wx-kv-stale { opacity:.55; }
+      .wx-kv-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; gap:8px; }
+      .wx-kv-name {
+        font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:15px;
+        letter-spacing:.04em; color:var(--blue);
+      }
+      .wx-kv-meta { font-size:10px; color:var(--ink-light); text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+      .wx-kv-body { display:flex; align-items:center; gap:18px; }
+      .wx-kv-big { flex:1; }
+      .wx-kv-wind { font-family:'DM Mono',monospace; font-weight:700; font-size:2.2rem; line-height:1; color:var(--ink); }
+      .wx-kv-wind sub { font-size:.45em; font-weight:500; margin-left:3px; color:var(--ink-light); vertical-align:baseline; }
+      .wx-kv-bft { font-size:11px; color:var(--ink-light); margin-top:4px; letter-spacing:.05em; text-transform:uppercase; }
+      .wx-kv-arrow {
+        font-size:2.4rem; color:var(--blue); line-height:1; width:42px; text-align:center;
+        transform-origin:center; transition:transform .3s;
+      }
+      .wx-kv-dir { text-align:right; min-width:50px; }
+      .wx-kv-cardinal { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.2rem; color:var(--ink); }
+      .wx-kv-deg { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-light); margin-top:2px; }
+      .wx-kv-gust {
+        margin-top:10px; padding:6px 0 0; font-family:'DM Mono',monospace;
+        font-size:11px; color:var(--ink-light); border-top:1px dashed var(--line);
+      }
+      .wx-kv-gust-warn { color:var(--warn); font-weight:600; }
+      .wx-kv-diff {
+        margin-top:8px; padding:6px 8px; font-size:11.5px; font-weight:600;
+        border-left:3px solid var(--ink-light);
+      }
+      .wx-kv-diff.ok { background:#eaf6ee; border-color:var(--ok); color:var(--ok); }
+      .wx-kv-diff.wn { background:#fff5e6; border-color:var(--warn); color:var(--warn); }
+      .wx-kv-diff.cr { background:#fbe9eb; border-color:var(--danger); color:var(--danger); }
+
+      .wx-kv-others { display:flex; flex-direction:column; }
+      .wx-kv-row {
+        display:grid; grid-template-columns: 1fr 50px 60px 50px 60px 70px;
+        gap:8px; padding:8px 14px; align-items:center; font-size:12px;
+        border-bottom:1px solid var(--line);
+      }
+      .wx-kv-row:last-child { border-bottom:none; }
+      .wx-kv-row-name { color:var(--ink); font-weight:600; }
+      .wx-kv-row-dist, .wx-kv-row-age { font-size:10px; color:var(--ink-light); }
+      .wx-kv-row-wind { font-family:'DM Mono',monospace; font-weight:700; color:var(--ink); text-align:right; }
+      .wx-kv-row-wind small { font-weight:500; color:var(--ink-light); margin-left:2px; font-size:.85em; }
+      .wx-kv-row-gust { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-light); text-align:right; }
+      .wx-kv-row-dir  { font-size:11px; color:var(--ink); text-align:right; }
+      .wx-kv-row-arrow { display:inline-block; color:var(--blue); transform-origin:center; }
+
+      .wx-kv-src { padding:8px 14px; font-size:10px; color:var(--ink-light); border-top:1px solid var(--line); text-align:right; }
+
+      @media (max-width:480px) {
+        .wx-kv-row { grid-template-columns: 1.4fr 50px 50px 60px; gap:6px; }
+        .wx-kv-row-gust, .wx-kv-row-age { display:none; }
+      }
+    </style>`;
+}
+
 function renderFull(container, fc, ocean, sun, lat, lon, place) {
   const ts    = fc.properties.timeseries;
   if (!ts?.length) throw new Error('Ingen timeseries');
@@ -293,21 +450,27 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
                  : sailWarn ? 'Moderat — vær forsiktig'
                  : 'Gode forhold';
 
-  // 24-timers timestrip
-  const hourStrip = ts.slice(0, 24).map((t, i) => {
+  // 12-timers timestrip
+  const hourStrip = ts.slice(0, 12).map((t, i) => {
     const d  = t?.data?.instant?.details || {};
     const n  = t?.data?.next_1_hours || t?.data?.next_6_hours || {};
     const s  = n?.summary?.symbol_code || '';
     const tm = Math.round(d.air_temperature ?? 0);
+    const ws = Number(d.wind_speed || 0);
     const pr = Number(n?.details?.precipitation_amount || 0);
     const pp = Number(n?.details?.probability_of_precipitation || 0);
+    const precHtml = pr > 0.1
+      ? `<div class="wx-hp">💧 ${pr.toFixed(1)}mm</div>`
+      : pp > 20
+        ? `<div class="wx-hp wx-hp-prob">💧 ${pp}%</div>`
+        : `<div class="wx-hp wx-hp-empty">—</div>`;
     return `
       <div class="wx-hcell${i===0?' wx-hcell-now':''}">
         <div class="wx-ht">${i===0?'Nå':fmtTime(t.time)}</div>
         <div class="wx-hi">${symIcon(s)}</div>
         <div class="wx-hv">${tm}°</div>
-        ${pr > 0.1 ? `<div class="wx-hp">${pr.toFixed(1)}mm</div>`
-          : pp > 20 ? `<div class="wx-hp">${pp}%</div>` : ''}
+        <div class="wx-hw">💨 ${Math.round(ws)} m/s</div>
+        ${precHtml}
       </div>`;
   }).join('');
 
@@ -344,6 +507,14 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
   }).join('');
 
   document.getElementById('wx-full').innerHTML = `
+
+    <div class="sl">Målt vind nå · Kystverket</div>
+    <div id="wx-kystvaer" class="wx-kv">
+      <div class="wx-kv-loading">Henter live målinger…</div>
+    </div>
+
+    <div class="sl">Neste 12 timer</div>
+    <div class="wx-hstrip">${hourStrip}</div>
 
     <div class="wx-hero">
       <div class="wx-eyebrow">
@@ -382,9 +553,6 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
       ${sc('Nedbør 1t', prec1h.toFixed(1) + ' mm', precProb > 0 ? precProb + '% sannsynlig' : 'liten sannsynlighet', '')}
       ${sc('Luftfukt.', humidity + '%', 'relativ fuktighet', '')}
     </div>
-
-    <div class="sl">Neste 24 timer</div>
-    <div class="wx-hstrip">${hourStrip}</div>
 
     <div class="sl">Marine forhold · Oceanforecast</div>
     <div class="sgrid">
@@ -457,15 +625,18 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
     .wx-tide-src { padding:8px 14px; font-size:10px; color:var(--ink-light); border-top:1px solid var(--line); text-align:right; }
     .wx-sun-row { display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:rgba(255,255,255,.5); padding-bottom:16px; }
     .wx-sun-row span { white-space:nowrap; }
-    .wx-hstrip { display:flex; overflow-x:auto; gap:0; scrollbar-width:none; margin-bottom:4px; border:1px solid var(--line); }
+    .wx-hstrip { display:flex; overflow-x:auto; gap:0; scrollbar-width:none; margin-bottom:16px; border:1px solid var(--line); }
     .wx-hstrip::-webkit-scrollbar { display:none; }
-    .wx-hcell { flex:0 0 64px; padding:10px 8px; text-align:center; border-right:1px solid var(--line); background:var(--white); }
+    .wx-hcell { flex:1 0 88px; padding:12px 6px; text-align:center; border-right:1px solid var(--line); background:var(--white); }
     .wx-hcell:last-child { border-right:none; }
     .wx-hcell-now { background:var(--blue-tint); }
-    .wx-ht { font-family:'Barlow Condensed',sans-serif; font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); margin-bottom:5px; }
-    .wx-hi { font-size:1.3rem; line-height:1; margin-bottom:4px; }
-    .wx-hv { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1rem; color:var(--ink); }
-    .wx-hp { font-size:10px; color:var(--blue); margin-top:2px; font-weight:600; }
+    .wx-ht { font-family:'Barlow Condensed',sans-serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); margin-bottom:6px; }
+    .wx-hi { font-size:1.6rem; line-height:1; margin-bottom:6px; }
+    .wx-hv { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.15rem; color:var(--ink); margin-bottom:6px; }
+    .wx-hw { font-family:'DM Mono',monospace; font-size:10px; color:var(--ink-light); margin-bottom:2px; white-space:nowrap; }
+    .wx-hp { font-family:'DM Mono',monospace; font-size:10px; color:var(--blue); font-weight:600; white-space:nowrap; }
+    .wx-hp-prob { color:var(--ink-light); font-weight:500; }
+    .wx-hp-empty { color:transparent; }
     .wx-hcell-now .wx-ht { color:var(--blue); }
     .wx-dstrip { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:16px; }
     @media (min-width:500px) { .wx-dstrip { grid-template-columns:repeat(6,1fr); } }
