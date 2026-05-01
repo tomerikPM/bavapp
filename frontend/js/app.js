@@ -22,9 +22,10 @@ const PAGES = {
   cameras:       () => import('./pages/cameras.js'),
   fuel_efficiency: () => import('./pages/fuel_efficiency.js'),
   sauna:         () => import('./pages/sauna.js'),
+  ais:           () => import('./pages/ais.js'),
 };
 
-const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine'];
+const SK_PAGES = ['dashboard', 'electrical', 'tanks', 'engine', 'ais'];
 
 // Bakoverkompatibel ruting: gamle #map-lenker → trips-siden
 const PAGE_ALIASES = { map: 'trips' };

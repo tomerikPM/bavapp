@@ -103,6 +103,13 @@ export const sensors = {
   batch:   (readings)     => req(b('/sensors/batch'), j({ readings })),
 };
 
+export const ais = {
+  // bbox = "lat1,lon1,lat2,lon2" (sw → ne). Returnerer flat array av AIS-meldinger.
+  snapshot: (bbox) => req(b('/ais/snapshot?bbox=' + encodeURIComponent(bbox)), {}, 15000),
+  // SSE-stream-URL — frontend åpner en EventSource direkte mot denne.
+  streamUrl: (bbox) => b('/ais/stream?bbox=' + encodeURIComponent(bbox)),
+};
+
 export async function askClaude(messages, systemPrompt) {
   if (!CFG.anthropic) throw new Error('API-nøkkel mangler');
   const controller = new AbortController();

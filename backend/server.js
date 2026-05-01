@@ -107,6 +107,7 @@ app.use('/api/photos',       require('./routes/photos'));
 app.use('/api/image',        require('./routes/image'));
 app.use('/api/vessel',       require('./routes/vessel'));
 app.use('/api/sauna',        require('./routes/sauna'));
+app.use('/api/ais',          require('./routes/ais'));
 
 const tracker = require('./tripTracker');
 const watcher = require('./eventWatcher');
