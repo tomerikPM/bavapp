@@ -598,7 +598,36 @@ router.get('/devices', (req, res) => {
     GROUP BY d.mac
     ORDER BY (SUM(d_rx) + SUM(d_tx)) DESC
   `).all(since);
-  res.json({ rows, hours });
+
+  // Estimer bytes per enhet ut fra total WAN-bytes-delta i samme vindu.
+  // Samme metode som /devices/recent — én snittstørrelse * pakkeandel.
+  const totals = db.prepare(`
+    SELECT MIN(rx_bytes) AS rx_min, MAX(rx_bytes) AS rx_max,
+           MIN(tx_bytes) AS tx_min, MAX(tx_bytes) AS tx_max
+    FROM router_history WHERE ts >= ? AND rx_bytes IS NOT NULL
+  `).get(since);
+
+  const totalBytes = (totals && totals.rx_max != null)
+    ? Math.max(0, (totals.rx_max - totals.rx_min) + (totals.tx_max - totals.tx_min))
+    : 0;
+  const wanRxBytes = (totals && totals.rx_max != null) ? Math.max(0, totals.rx_max - totals.rx_min) : 0;
+  const wanTxBytes = (totals && totals.tx_max != null) ? Math.max(0, totals.tx_max - totals.tx_min) : 0;
+  const totalPackets = rows.reduce((a, r) => a + (r.rx_packets || 0) + (r.tx_packets || 0), 0);
+  const bytesPerPacket = totalPackets > 0 ? totalBytes / totalPackets : 0;
+
+  for (const r of rows) {
+    const pkts = (r.rx_packets || 0) + (r.tx_packets || 0);
+    r.est_bytes = Math.round(pkts * bytesPerPacket);
+  }
+
+  res.json({
+    rows,
+    hours,
+    bytes_per_packet: Math.round(bytesPerPacket * 10) / 10,
+    wan_rx_bytes: wanRxBytes,
+    wan_tx_bytes: wanTxBytes,
+    wan_total_bytes: totalBytes,
+  });
 });
 
 // GET /api/router/devices/recent?minutes=60 — anslått MB/time per enhet siste vindu.

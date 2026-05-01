@@ -998,15 +998,22 @@ async function loadDeviceTraffic() {
   try {
     const r = await fetch(`${BASE()}/api/router/devices?hours=${_deviceTrafficHours}`);
     if (!r.ok) return;
-    const { rows = [] } = await r.json();
+    const { rows = [], bytes_per_packet = 0, wan_total_bytes = 0 } = await r.json();
 
-    // Pakke-fordeling, ikke bytes — vi kan bare vise relativ andel
+    // Pakke-fordeling per enhet pluss byte-estimat (avledet av WAN-totaler i vinduet)
     const total = rows.reduce((a, r) => a + (r.rx_packets || 0) + (r.tx_packets || 0), 0);
     const fmtPkts = n => {
       if (n == null) return '—';
       if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
       if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
       return String(n);
+    };
+    const fmtBytes = n => {
+      if (n == null || !isFinite(n) || n <= 0) return '—';
+      if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB';
+      if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB';
+      if (n >= 1024)      return (n / 1024).toFixed(1) + ' KB';
+      return n + ' B';
     };
     const labelFor = (h) =>
       h === 1   ? 'siste time'
@@ -1064,13 +1071,17 @@ async function loadDeviceTraffic() {
                   ${sub ? `<span>${escapeHtml(sub)}</span>` : ''}
                   <span>↓ ${fmtPkts(r.rx_packets)} pakker</span>
                   <span>↑ ${fmtPkts(r.tx_packets)} pakker</span>
+                  ${r.est_bytes > 0 ? `<span>≈ <strong>${fmtBytes(r.est_bytes)}</strong></span>` : ''}
                 </div>
               </div>`;
           }).join('')}
         </div>
         <div class="rt-dev-note">
-          Pakker (ikke bytes) per WiFi-assosiering — relativ fordeling.
           Total ${fmtPkts(total)} pakker fra ${rows.length} ${rows.length === 1 ? 'enhet' : 'enheter'}.
+          ${wan_total_bytes > 0
+            ? `WAN brukt: <strong>${fmtBytes(wan_total_bytes)}</strong> · snitt-pakke ${Math.round(bytes_per_packet)} B.`
+            : 'Ingen WAN-byte-data i vinduet — viser kun pakke-fordeling.'}
+          Byte-estimat per enhet er WAN-totalen fordelt etter pakke-andel — kan være skjevt hvis én enhet har mest store pakker (video) og andre kun små (DNS/chat).
         </div>
       `;
     }
