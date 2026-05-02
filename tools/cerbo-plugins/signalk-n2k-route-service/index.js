@@ -1,14 +1,18 @@
 // signalk-n2k-route-service
 // Emitter PGN 130064 (Database List), 130065 (Route List), 130067 (Route - WP Name & Position)
 // for aktiv BavApp-rute. Garmin chartplotter sender 126208 Request Group Function for 130067 når
-// den ser 129285 fra oss; uten svar avviser den ruten som ufullstendig.
+// den ser 129285 fra oss; uten svar avviser den ruten som ufullstendig — men hvert svar tolkes
+// som "ny rute mottatt" og lagres lokalt. Vi løser det ved å aldri svare; kun emit ved hash-endring.
 //
 // Strategi:
 //   - Pollér activeRoute hvert 2 sek
 //   - Send 130064 + 130065 + 130067 én gang når aktiv rute endres (innhold-hash)
-//   - Keep-alive hvert 30 sek (broadcast)
-//   - Svar umiddelbart på Garmin 126208 Request Group Function (PGN 130064/130065/130067)
+//   - Aldri svar på 126208-request (kun teller diagnostisk)
 //   - Send via app.emit('nmea2000JsonOut', pgn) → canbus.js skriver til vecan0 med vår SA
+//
+// Begrensning (testet 2026-05-02): Garmin GPSMAP 1223xsv aksepterer rute-PGN-er
+// (129285+130067) men ignorerer standalone WP-PGN (130074 alene). Auto Guidance er kun
+// tilgjengelig for lokalt opprettede ruter, ikke N2K-mottatte. Se prosjektnoten.
 
 module.exports = function (app) {
   let pollTimer = null;
