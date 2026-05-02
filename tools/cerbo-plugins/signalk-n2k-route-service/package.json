@@ -1,0 +1,7 @@
+{
+  "name": "signalk-n2k-route-service",
+  "version": "0.1.0",
+  "description": "Emit Route and WP Service PGNs (130064/130065/130067) for active BavApp route",
+  "main": "index.js",
+  "keywords": ["signalk-node-server-plugin"]
+}
