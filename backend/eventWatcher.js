@@ -123,8 +123,11 @@ function checkEngine(sk) {
 }
 
 function checkShorepower(sk) {
-  const shore = inferShore(sk);
-  if (shore == null || shore === _prev.shorepower) return;
+  const shore = inferShore(sk, _prev.shorepower);
+  if (shore == null || shore === _prev.shorepower) {
+    _prev.shorepower = shore;
+    return;
+  }
   if (shore)
     fire('shore_on',  'electrical', 'Landstrøm tilkoblet', '230V AC · lading startet', 'info',  'shore');
   else
@@ -132,19 +135,21 @@ function checkShorepower(sk) {
   _prev.shorepower = shore;
 }
 
-// Cerbo har ingen direkte shore-detect — utled fra LiFePO4-signatur.
+// Cerbo har ingen direkte shore-detect og laderne (Cristec/IP22) publiserer ikke
+// state til Signal K. LiFePO4 hviler høyt ved full SOC (volt ubrukelig), så vi
+// går på husbank-strøm med dødbånd og sticky verdi.
 // Holdes synkron med SK.get.shorepower() i frontend/js/signalk.js.
-function inferShore(sk) {
+function inferShore(sk, prev = null) {
   const explicit = sk['electrical.ac.shore.available'];
   if (explicit != null) return explicit;
-  const cur  = sk['electrical.batteries.279.current'];
-  const volt = sk['electrical.batteries.279.voltage'];
-  const rpm  = (sk['propulsion.port.revolutions'] ?? 0) * 60;
-  if (rpm >= 100) return null;
-  if (cur != null && cur > 0.5) return true;
-  if (volt != null && volt > 13.4 && (cur == null || cur > -2)) return true;
-  if (cur != null && cur < -1) return false;
-  return null;
+  const cur = sk['electrical.batteries.279.current'];
+  const rpm = (sk['propulsion.port.revolutions'] ?? 0) * 60;
+  if (rpm >= 100) return prev;
+  if (cur != null) {
+    if (cur >  0.5) return true;
+    if (cur < -0.5) return false;
+  }
+  return prev;
 }
 
 function checkBattery(sk) {

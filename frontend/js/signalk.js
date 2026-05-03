@@ -18,6 +18,7 @@ let _listeners = {};
 let _state = {};
 let _connected = false;
 let _lastSeen = null;
+let _shoreSticky = null; // sticky shore-power state for SK.get.shorepower (se kommentar der)
 
 export function getState()    { return _state; }
 export function isConnected() { return _connected; }
@@ -149,19 +150,20 @@ export const get = {
   shorepower:   (s = _state) => {
     const explicit = s['electrical.ac.shore.available'];
     if (explicit != null) return explicit;
-    // Cerbo har ingen shore-detect; utled fra LiFePO4-signatur (motor av, ingen solar):
-    //   cur > 0.5A      → aktiv lading (bulk/absorption) → shore on
-    //   volt > 13.4V    → float-modus, LiFePO4 holder ikke selv så høyt → shore on
-    //   cur < -1A       → tydelig forbruk → shore off
-    //   ellers          → ukjent (kan være rett etter frakobling)
-    const cur  = s['electrical.batteries.279.current'];
-    const volt = s['electrical.batteries.279.voltage'];
-    const rpm  = (s['propulsion.port.revolutions'] ?? 0) * 60;
-    if (rpm >= 100) return null; // motor i gang → alternator kan også lade
-    if (cur != null && cur > 0.5) return true;
-    if (volt != null && volt > 13.4 && (cur == null || cur > -2)) return true;
-    if (cur != null && cur < -1) return false;
-    return null;
+    // Cerbo har ingen shore-detect og hverken Cristec eller IP22 publiserer ladertilstand.
+    // Vi har bare husbank-strøm å gå på. LiFePO4 hviler høyt (13.3–13.5V) ved full SOC,
+    // så voltage er ubrukelig. Strøm med dødbånd + sticky verdi:
+    //   cur > 0.5A   → on (decisive)
+    //   cur < -0.5A  → off (decisive)
+    //   |cur| ≤ 0.5  → behold forrige verdi (float eller stille hvile er tvetydig)
+    const cur = s['electrical.batteries.279.current'];
+    const rpm = (s['propulsion.port.revolutions'] ?? 0) * 60;
+    if (rpm >= 100) return _shoreSticky; // motor lader → strøm sier ikke noe om shore
+    if (cur != null) {
+      if (cur >  0.5) _shoreSticky = true;
+      else if (cur < -0.5) _shoreSticky = false;
+    }
+    return _shoreSticky;
   },
   inverter:     (s = _state) => s['electrical.inverter.0.state'] === 'on',
 
