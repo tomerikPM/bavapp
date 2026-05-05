@@ -720,7 +720,7 @@ async function loadFuelPrices() {
             title="Fyll inn som drivstoffkostnad">
             Fyll inn
           </button>
-          ${s.lat && s.lon ? `
+          ${s.lat && s.lon && s.coords_precise ? `
           <button class="fuel-gpx-btn"
             data-station="${s.name}"
             data-muni="${s.municipality || ''}"
@@ -730,7 +730,7 @@ async function loadFuelPrices() {
             title="Last ned GPX-waypoint til Garmin">
             GPX
           </button>` : ''}
-          ${s.lat && s.lon ? `
+          ${s.lat && s.lon && s.coords_precise ? `
           <button class="fuel-nav-btn"
             data-station="${s.name}"
             data-lat="${s.lat}"
@@ -874,7 +874,7 @@ function downloadGpx(name, municipality, lat, lon, pricePerLiter) {
     '  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">',
     `  <metadata><time>${now}</time></metadata>`,
     `  <wpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">`,
-    `    <n>${safeName}</n>`,
+    `    <name>${safeName}</name>`,
     `    <desc>${desc}</desc>`,
     '    <sym>Anchor</sym>',
     '    <type>Fuel</type>',

@@ -248,6 +248,17 @@ function renderTide(high, low, station) {
 // Live målt vind fra Kystverkets stasjoner. fc = MET-prognose; brukes til
 // å sammenligne målt vs. prognosert vind for nærmeste stasjon, og flagge
 // hvis avvik er stort (prognose usikker).
+function renderTrend(trend) {
+  if (!trend) return '';
+  const { delta, ago_min, dir } = trend;
+  const sym = dir === 'up' ? '↗' : dir === 'down' ? '↘' : '→';
+  const cls = dir === 'flat' ? 'flat' : dir === 'up' ? 'up' : 'down';
+  const text = dir === 'flat'
+    ? `Stabil siste ${ago_min} min`
+    : `${delta > 0 ? '+' : ''}${delta} m/s siste ${ago_min} min`;
+  return `<div class="wx-kv-trend wx-kv-trend-${cls}"><span class="wx-kv-trend-sym">${sym}</span> ${text}</div>`;
+}
+
 async function loadKystvaer(lat, lon, fc) {
   const el = document.getElementById('wx-kystvaer');
   if (!el) return;
@@ -296,7 +307,10 @@ function renderKystvaer(data, fcWind) {
 
   const mainBft = main.wind != null ? beaufort(main.wind) : null;
   const gustFactor = (main.wind > 0 && main.gust > 0) ? main.gust / main.wind : null;
-  const gusty = gustFactor != null && gustFactor >= 1.5;
+  // Bare flagg ved sustained ≥ 5 m/s — under det er kastfaktor matematisk støy
+  // (særlig fra mekanisk turbulens i havner). Ekte bygevær krever konvektiv
+  // himmel, og det vet vi ikke fra målestasjonen alene.
+  const gusty = main.wind >= 5 && gustFactor != null && gustFactor >= 1.5;
 
   const mainCard = `
     <div class="wx-kv-main${main.stale ? ' wx-kv-stale' : ''}">
@@ -316,8 +330,9 @@ function renderKystvaer(data, fcWind) {
         </div>
       </div>
       <div class="wx-kv-gust ${gusty ? 'wx-kv-gust-warn' : ''}">
-        💨 Kast ${main.gust ?? '—'} m/s${gustFactor ? ` · faktor ${gustFactor.toFixed(1)}` : ''}${gusty ? ' — bygevær' : ''}
+        💨 Kast ${main.gust ?? '—'} m/s${gustFactor ? ` · faktor ${gustFactor.toFixed(1)}` : ''}${gusty ? ' — kraftige kast' : ''}
       </div>
+      ${renderTrend(main.trend)}
       ${diffBadge}
     </div>`;
 
@@ -369,6 +384,16 @@ function renderKystvaer(data, fcWind) {
         font-size:11px; color:var(--ink-light); border-top:1px dashed var(--line);
       }
       .wx-kv-gust-warn { color:var(--warn); font-weight:600; }
+      .wx-kv-trend {
+        margin-top:6px; font-family:'DM Mono',monospace; font-size:11px;
+        color:var(--ink-light); display:flex; align-items:center; gap:6px;
+      }
+      .wx-kv-trend-sym { font-size:14px; line-height:1; font-weight:700; }
+      .wx-kv-trend-up   { color:var(--warn); }
+      .wx-kv-trend-up   .wx-kv-trend-sym { color:var(--warn); }
+      .wx-kv-trend-down { color:var(--ok); }
+      .wx-kv-trend-down .wx-kv-trend-sym { color:var(--ok); }
+      .wx-kv-trend-flat { color:var(--ink-light); }
       .wx-kv-diff {
         margin-top:8px; padding:6px 8px; font-size:11.5px; font-weight:600;
         border-left:3px solid var(--ink-light);
@@ -457,8 +482,18 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
     const s  = n?.summary?.symbol_code || '';
     const tm = Math.round(d.air_temperature ?? 0);
     const ws = Number(d.wind_speed || 0);
+    const wd = d.wind_from_direction != null ? Number(d.wind_from_direction) : null;
+    const wg = d.wind_speed_of_gust != null ? Number(d.wind_speed_of_gust) : null;
     const pr = Number(n?.details?.precipitation_amount || 0);
     const pp = Number(n?.details?.probability_of_precipitation || 0);
+    // Pil peker dit vinden KOMMER FRA — samme konvensjon som hovedkortet (rotér ↓ med dir+180)
+    const arrow = wd != null
+      ? `<span class="wx-h-arrow" style="transform:rotate(${wd + 180}deg)">↓</span>`
+      : '';
+    // Vis kast bare hvis det skiller seg merkbart fra snittvinden (≥ 1 m/s ekstra)
+    const gustHtml = (wg != null && wg > ws + 1)
+      ? `<div class="wx-hg">kast ${Math.round(wg)}</div>`
+      : `<div class="wx-hg wx-hg-empty">—</div>`;
     const precHtml = pr > 0.1
       ? `<div class="wx-hp">💧 ${pr.toFixed(1)}mm</div>`
       : pp > 20
@@ -469,7 +504,8 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
         <div class="wx-ht">${i===0?'Nå':fmtTime(t.time)}</div>
         <div class="wx-hi">${symIcon(s)}</div>
         <div class="wx-hv">${tm}°</div>
-        <div class="wx-hw">💨 ${Math.round(ws)} m/s</div>
+        <div class="wx-hw">${arrow}${Math.round(ws)} m/s</div>
+        ${gustHtml}
         ${precHtml}
       </div>`;
   }).join('');
@@ -633,7 +669,10 @@ function renderFull(container, fc, ocean, sun, lat, lon, place) {
     .wx-ht { font-family:'Barlow Condensed',sans-serif; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-light); margin-bottom:6px; }
     .wx-hi { font-size:1.6rem; line-height:1; margin-bottom:6px; }
     .wx-hv { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:1.15rem; color:var(--ink); margin-bottom:6px; }
-    .wx-hw { font-family:'DM Mono',monospace; font-size:10px; color:var(--ink-light); margin-bottom:2px; white-space:nowrap; }
+    .wx-hw { font-family:'DM Mono',monospace; font-size:10px; color:var(--ink-light); margin-bottom:2px; white-space:nowrap; display:flex; align-items:center; justify-content:center; gap:3px; }
+    .wx-h-arrow { display:inline-block; color:var(--blue); font-size:12px; line-height:1; transform-origin:center; }
+    .wx-hg { font-family:'DM Mono',monospace; font-size:9.5px; color:var(--warn); margin-bottom:2px; white-space:nowrap; font-weight:600; }
+    .wx-hg-empty { color:transparent; }
     .wx-hp { font-family:'DM Mono',monospace; font-size:10px; color:var(--blue); font-weight:600; white-space:nowrap; }
     .wx-hp-prob { color:var(--ink-light); font-weight:500; }
     .wx-hp-empty { color:transparent; }

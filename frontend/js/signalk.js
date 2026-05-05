@@ -63,19 +63,27 @@ async function poll() {
   }
 }
 
+let _wsRetryDelay = 5000;
 function connectWS() {
   const proto = SK_BASE.startsWith('https') ? 'wss:' : 'ws:';
   const host  = SK_BASE.replace(/^https?:\/\//, '');
-  const wsUrl = `${proto}//${host}/signalk/v1/stream`;
+  // subscribe=self: kun deltaer for eget fartøy. Uten dette får vi ALLE
+  // kontekster (inkl. hvert AIS-fartøy fra signalk-aisstream-pluginen),
+  // som blåser opp WAN-trafikken via Cloudflare-tunnelen unødvendig.
+  const wsUrl = `${proto}//${host}/signalk/v1/stream?subscribe=self`;
   try {
     _ws = new WebSocket(wsUrl);
+    _ws.onopen = () => { _wsRetryDelay = 5000; };
     _ws.onmessage = (e) => {
       try {
         const delta = JSON.parse(e.data);
         if (delta.updates) applyDelta(delta);
       } catch {}
     };
-    _ws.onclose = () => setTimeout(connectWS, 5000);
+    _ws.onclose = () => {
+      setTimeout(connectWS, _wsRetryDelay);
+      _wsRetryDelay = Math.min(_wsRetryDelay * 2, 60000);
+    };
     _ws.onerror = () => {};
   } catch {}
 }

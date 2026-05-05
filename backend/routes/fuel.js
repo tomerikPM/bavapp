@@ -89,6 +89,11 @@ try {
     db.exec(`ALTER TABLE fuel_cache ADD COLUMN slug TEXT`);
     console.log('[fuel] Migrasjon: la til kolonne slug');
   }
+  if (!cols.some(c => c.name === 'coords_precise')) {
+    db.exec(`ALTER TABLE fuel_cache ADD COLUMN coords_precise INTEGER DEFAULT 0`);
+    db.exec(`UPDATE fuel_cache SET coords_precise = 1 WHERE source = 'bunkring'`);
+    console.log('[fuel] Migrasjon: la til kolonne coords_precise (bunkring=1)');
+  }
 } catch (e) {
   console.error('[fuel] Migrasjonsfeil:', e.message);
 }
@@ -375,6 +380,23 @@ const MUNI_COORDS = {
   'Skjervøy': [70.03, 20.98], 'Nordreisa': [69.76, 21.02], 'Kvænangen': [69.93, 21.97],
 };
 
+// ── Per-stasjon koordinat-overstyring for kjente marinaer ──────────────────
+// Pumpepriser-kilden mangler lat/lon, og kommune-sentroide treffer ikke en
+// spesifikk marina. Match på normalisert (lowercase) substring i stasjonsnavnet.
+// Treff her markeres som coords_precise=1 og brukes i GPX/N2K-eksport.
+const STATION_COORDS = {
+  'korsvik': [58.14247307662066, 8.071205741829823],  // Korsvik båthavn, Kristiansand (verifisert)
+};
+
+function getStationCoords(name) {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  for (const [key, coords] of Object.entries(STATION_COORDS)) {
+    if (n.includes(key)) return coords;
+  }
+  return null;
+}
+
 // ── Oppslag med fuzzy match for å håndtere variasjoner ──────────────────────
 function getMuniCoords(municipality) {
   if (!municipality) return null;
@@ -402,7 +424,7 @@ function fetchStationsJson() {
         'Referer':     'https://www.pumpepriser.no/',
         'Origin':      'https://www.pumpepriser.no',
       },
-      timeout: 15000,
+      timeout: 30000,
     }, res => {
       const chunks = [];
       res.on('data', d => chunks.push(d));
@@ -460,22 +482,32 @@ function saveToCache(stations, scrapedAt, source = 'pumpepriser') {
   const ins = db.prepare(`
     INSERT OR REPLACE INTO fuel_cache
       (scraped_at, station_id, name, municipality, county, diesel, petrol,
-       lat, lon, price_updated_at, raw_timestamp, source, fuel_grade, slug)
+       lat, lon, coords_precise, price_updated_at, raw_timestamp, source, fuel_grade, slug)
     VALUES
       (@scraped_at, @station_id, @name, @municipality, @county, @diesel, @petrol,
-       @lat, @lon, @price_updated_at, @raw_timestamp, @source, @fuel_grade, @slug)
+       @lat, @lon, @coords_precise, @price_updated_at, @raw_timestamp, @source, @fuel_grade, @slug)
   `);
   const tx = db.transaction(rows => { for (const r of rows) ins.run(r); });
 
   let changed = 0, unchanged = 0, newlySeen = 0;
 
   const rows = stations.map(s => {
-    // Koordinater: bunkring leverer dem; pumpepriser trenger oppslag på kommune
+    // Koordinater: bunkring leverer dem; pumpepriser trenger oppslag.
+    // coords_precise=1 betyr at posisjonen er stasjonens egen (bunkring eller
+    // STATION_COORDS-overlay). =0 er kommune-sentroide-fallback — duger til
+    // distansesortering, men ikke til GPX-export eller N2K-navigasjon.
     let lat = s.lat ?? null;
     let lon = s.lon ?? null;
-    if (lat == null && lon == null && s.municipality) {
-      const coords = getMuniCoords(s.municipality);
-      if (coords) { lat = coords[0]; lon = coords[1]; }
+    let coordsPrecise = (lat != null && lon != null) ? 1 : 0;
+    if (!coordsPrecise) {
+      const stationCoords = getStationCoords(s.name);
+      if (stationCoords) {
+        lat = stationCoords[0]; lon = stationCoords[1];
+        coordsPrecise = 1;
+      } else if (s.municipality) {
+        const muniCoords = getMuniCoords(s.municipality);
+        if (muniCoords) { lat = muniCoords[0]; lon = muniCoords[1]; }
+      }
     }
 
     const prev = prevStmt.get(s.station_id);
@@ -501,6 +533,7 @@ function saveToCache(stations, scrapedAt, source = 'pumpepriser') {
       petrol:           s.petrol,
       lat,
       lon,
+      coords_precise:   coordsPrecise,
       price_updated_at: priceChangedAt,
       raw_timestamp:    s.raw_timestamp || null,
       source:           s.source || source,
@@ -634,7 +667,7 @@ function fetchUrl(url) {
         'Accept':     'text/html,application/json,*/*',
         'Referer':    'https://www.pumpepriser.no/',
       },
-      timeout: 15000,
+      timeout: 30000,
     }, res => {
       const chunks = [];
       res.on('data', d => chunks.push(d));

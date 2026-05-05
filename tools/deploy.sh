@@ -5,11 +5,12 @@
 #   ./tools/deploy.sh                       # deploy + restart bavapp-service
 #   ./tools/deploy.sh --dry-run             # vis hva som ville endres, gjør ingenting
 #   ./tools/deploy.sh --no-restart          # deploy uten å restarte
-#   CERBO_HOST=root@10.0.0.50 ./tools/deploy.sh
+#   CERBO_HOST=cerbo-lan ./tools/deploy.sh    # bruk LAN istedenfor tunnel
 #
 # Forutsetter:
-#   - SSH-tilgang til Cerbo (LAN: 192.168.1.237 på Summer-wifi)
-#   - rsync på Mac (kommer ferdig)
+#   - SSH-config-alias `cerbo` (Cloudflare-tunnel via ssh.summermylife.no)
+#     eller `cerbo-lan` (192.168.1.237) når på Summer-wifi
+#   - rsync + cloudflared på Mac (brew install cloudflared)
 #
 # Hopper over (overskriver IKKE):
 #   - backend/.env  (produksjonsenv)
@@ -19,7 +20,7 @@
 
 set -e
 
-CERBO_HOST="${CERBO_HOST:-root@192.168.1.237}"
+CERBO_HOST="${CERBO_HOST:-cerbo}"
 DRY_RUN=""
 RESTART=1
 

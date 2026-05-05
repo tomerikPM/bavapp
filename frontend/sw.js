@@ -1,12 +1,12 @@
-// Service Worker — Bavaria Sport 32 PWA  v6
+// Service Worker — Bavaria Sport 32 PWA  v7
 // Strategi:
 //   HTML / JS / CSS  → Network-first (alltid ferskeste kode), fallback til cache
 //   Bilder / fonter  → Cache-first (endres sjelden), fallback til nettverk
 //   API / Signal K   → Kun nettverk, fallback til cache ved offline
 
-const CACHE_VERSION = 'bavaria32-v6';
-const CACHE_STATIC  = 'bavaria32-static-v6';
-const CACHE_ASSETS  = 'bavaria32-assets-v6';
+const CACHE_VERSION = 'bavaria32-v7';
+const CACHE_STATIC  = 'bavaria32-static-v7';
+const CACHE_ASSETS  = 'bavaria32-assets-v7';
 
 // Filer som precaches ved install (kun stabile assets)
 const PRECACHE = [

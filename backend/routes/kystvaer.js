@@ -21,7 +21,46 @@ const router  = express.Router();
 const HOST       = 'mobvaer.kystverket.no';
 const CACHE_TTL  = 2 * 60_000;     // 2 min — kilden oppdateres hvert 5. min
 const REQ_TIMEOUT = 8_000;
-const _cache = new Map();           // "lat,lon" → { ts, data }
+const HIST_KEEP  = 90 * 60_000;    // 90 min historikk per stasjon
+const _cache    = new Map();        // "lat,lon" → { ts, data }
+const _history  = new Map();        // stationId → [{ ts(ms), wind }]
+
+// Lagre nytt sample i ringbuffer (én rad per stasjon-måletid).
+function recordSample(id, wind, tsIso) {
+  if (wind == null || !tsIso) return;
+  const tsMs = new Date(tsIso).getTime();
+  if (!Number.isFinite(tsMs)) return;
+  const arr = _history.get(id) || [];
+  // Dedupe: skip hvis nyeste oppføring har samme måletid
+  if (arr.length && arr[arr.length-1].ts === tsMs) return;
+  arr.push({ ts: tsMs, wind });
+  // Prune
+  const cutoff = Date.now() - HIST_KEEP;
+  while (arr.length && arr[0].ts < cutoff) arr.shift();
+  _history.set(id, arr);
+}
+
+// Finn trend: sammenlign nyeste sample med ett mellom 15 og 60 min gammelt
+// (helst nær 30). Returnerer null hvis vi ikke har nok historikk.
+function getTrend(id, currentWind) {
+  if (currentWind == null) return null;
+  const arr = _history.get(id);
+  if (!arr || arr.length < 2) return null;
+  const now = Date.now();
+  const target = now - 30 * 60_000;
+  let best = null;
+  for (const s of arr) {
+    const age = now - s.ts;
+    if (age < 15*60_000 || age > 60*60_000) continue;
+    if (!best || Math.abs(s.ts - target) < Math.abs(best.ts - target)) best = s;
+  }
+  if (!best) return null;
+  const delta = currentWind - best.wind;
+  const ago_min = Math.round((now - best.ts) / 60_000);
+  // Stable hvis < 1 m/s endring på 30 min
+  const dir = delta > 1 ? 'up' : delta < -1 ? 'down' : 'flat';
+  return { delta: Number(delta.toFixed(1)), ago_min, dir };
+}
 
 // Stasjoner i Sørlandsregionen. Sortert grovt fra nær til langt.
 // Lagt på `source` for UI-fargekoding (Kystverket = 5-min, MET = 60-min).
@@ -81,18 +120,21 @@ async function fetchStation(s) {
     if (wind == null && dir == null) return null;
 
     const ageS = ts ? Math.round((Date.now() - new Date(ts).getTime()) / 1000) : null;
+    const windRounded = wind != null ? Number(wind.toFixed(1)) : null;
+    recordSample(s.id, windRounded, ts);
     return {
       id: s.id,
       name: s.name,
       lat: s.lat,
       lon: s.lon,
       source: s.source,
-      wind: wind != null ? Number(wind.toFixed(1)) : null,
+      wind: windRounded,
       gust: gust != null ? Number(gust.toFixed(1)) : null,
       dir:  dir  != null ? Math.round(dir)  : null,
       gust_dir: gdir != null ? Math.round(gdir) : null,
       ts,
       age_s: ageS,
+      trend: getTrend(s.id, windRounded),
       // "stale" hvis Kystverket-stasjon > 30 min, MET > 90 min
       stale: ageS != null && ageS > (s.source === 'MET' ? 90*60 : 30*60),
     };
@@ -133,5 +175,21 @@ router.get('/', async (req, res) => {
     res.status(502).json({ error: 'kystvaer_unavailable', message: e.message });
   }
 });
+
+// Bakgrunnspoller — fyller historikk hvert 5. min så trend er klar når
+// brukeren åpner siden. Hopper over stasjoner som svarer med null.
+let _pollTimer = null;
+function startPoller() {
+  if (_pollTimer) return;
+  const tick = async () => {
+    try { await Promise.all(STATIONS.map(fetchStation)); }
+    catch (_) { /* enkeltfeil ignoreres — historikk er best-effort */ }
+  };
+  // Kjør én gang umiddelbart, deretter hvert 5. min
+  tick();
+  _pollTimer = setInterval(tick, 5 * 60_000);
+  _pollTimer.unref?.();   // ikke blokker prosess-shutdown
+}
+startPoller();
 
 module.exports = router;
